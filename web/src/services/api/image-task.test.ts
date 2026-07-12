@@ -16,7 +16,7 @@ describe("image task cancellation boundaries", () => {
     it("explicit cancellation calls the server cancel endpoint", async () => {
         vi.mocked(axios.post).mockResolvedValue({ data: { ...runningTask, status: "canceled" } });
         await cancelImageTask("task-1", "sk-test");
-        expect(axios.post).toHaveBeenCalledWith("/v1/images/generations/task-1/cancel", undefined, expect.objectContaining({ headers: { Authorization: "Bearer sk-test" } }));
+        expect(axios.post).toHaveBeenCalledWith("/v1/images/tasks/task-1/cancel", undefined, expect.objectContaining({ headers: { Authorization: "Bearer sk-test" } }));
     });
 
     it("preserves a completed server result when cancellation loses the race", async () => {
@@ -87,11 +87,11 @@ describe("image edit task payload", () => {
 
         expect(axios.post).toHaveBeenCalledTimes(1);
         expect(axios.post).toHaveBeenCalledWith(
-            "/v1/images/generations",
+            "/v1/images/generations/async",
             expect.objectContaining({
-                model_config_id: 7,
-                input_images: [reference.dataUrl],
-                mask_image: mask.dataUrl,
+                model: "gpt-image-2",
+                images: [{ image_url: reference.dataUrl }],
+                mask: { image_url: mask.dataUrl },
             }),
             expect.objectContaining({ headers: { Authorization: "Bearer sk-test" } }),
         );
@@ -120,7 +120,7 @@ describe("image model config mapping", () => {
 
         await expect(requestGeneration(config, "draw")).resolves.toHaveLength(1);
         expect(axios.get).toHaveBeenCalledTimes(1);
-        expect(axios.post).toHaveBeenCalledWith("/v1/images/generations", expect.objectContaining({ model_config_id: 9 }), expect.anything());
+        expect(axios.post).toHaveBeenCalledWith("/v1/images/generations/async", expect.objectContaining({ model: "gpt-image-refresh" }), expect.anything());
     });
 
     it("reports a missing server model after a successful refresh", async () => {

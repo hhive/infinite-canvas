@@ -97,14 +97,15 @@ export type ImageTask = {
 };
 
 const imageModelConfigIDs = new Map<string, number>();
-const IMAGE_TASK_PATH = "/v1/images/generations";
+const IMAGE_ASYNC_PATH = "/v1/images/generations/async";
+const IMAGE_TASK_PATH = "/v1/images/tasks";
 
 function sameOriginHeaders(apiKey: string) {
     return apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined;
 }
 
 async function submitImageTask(config: AiConfig, body: Record<string, unknown>, options?: ImageTaskRequestOptions) {
-    const response = await axios.post<ImageTask>(IMAGE_TASK_PATH, { ...body, async: true }, { headers: sameOriginHeaders(config.apiKey), signal: options?.signal, withCredentials: true });
+    const response = await axios.post<ImageTask>(IMAGE_ASYNC_PATH, body, { headers: sameOriginHeaders(config.apiKey), signal: options?.signal, withCredentials: true });
     return response.data;
 }
 
@@ -729,14 +730,14 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     try {
-        const modelConfigId = await modelConfigID(requestConfig.model, requestConfig);
+        await modelConfigID(requestConfig.model, requestConfig);
         const task = await submitImageTask(
             requestConfig,
             {
-                model_config_id: modelConfigId,
+                model: modelOptionName(requestConfig.model),
                 prompt: withSystemPrompt(requestConfig, prompt),
                 n,
-                ...(quality ? { size_tier: quality } : {}),
+                ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
                 output_format: IMAGE_OUTPUT_FORMAT,
             },
@@ -755,20 +756,20 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     try {
-        const modelConfigId = await modelConfigID(requestConfig.model, requestConfig);
+        await modelConfigID(requestConfig.model, requestConfig);
         const inputImages = await Promise.all(references.map((image) => imageToDataUrl(image)));
         const maskImage = mask ? await imageToDataUrl(mask) : undefined;
         const task = await submitImageTask(
             requestConfig,
             {
-                model_config_id: modelConfigId,
+                model: modelOptionName(requestConfig.model),
                 prompt: withSystemPrompt(requestConfig, requestPrompt),
                 n,
-                ...(quality ? { size_tier: quality } : {}),
+                ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
                 output_format: IMAGE_OUTPUT_FORMAT,
-                input_images: inputImages,
-                ...(maskImage ? { mask_image: maskImage } : {}),
+                images: inputImages.map((image_url) => ({ image_url })),
+                ...(maskImage ? { mask: { image_url: maskImage } } : {}),
             },
             options,
         );
