@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Square, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
@@ -14,7 +14,8 @@ import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } f
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
-import { requestEdit, requestGeneration } from "@/services/api/image";
+import { cancelImageTask, requestEdit, requestGeneration, resumeImageTask, type ImageTask, type ImageTaskStatus } from "@/services/api/image";
+import { canResumeImageTask, imageTaskAuthIdentity, readImageWorkbenchTasks, removeImageWorkbenchTask, resolveImageTaskCancel, resumeImageWorkbenchRecord, saveImageWorkbenchTask, type ImageWorkbenchTaskRecord } from "@/services/image-task-storage";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -36,6 +37,8 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     image?: GeneratedImage;
     error?: string;
+    taskId?: string;
+    taskStatus?: ImageTaskStatus;
 };
 
 type GenerationLog = {
@@ -93,8 +96,9 @@ export default function ImagePage() {
     const imageCommand = useWorkbenchAgentStore((state) => state.imageCommand);
     const clearImageCommand = useWorkbenchAgentStore((state) => state.clearImageCommand);
     const processedCommandRef = useRef(0);
+    const slotControllersRef = useRef(new Map<string, AbortController>());
 
-    const model = effectiveConfig.imageModel || effectiveConfig.model;
+    const model = effectiveConfig.imageModel;
     const canGenerate = Boolean(prompt.trim());
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
 
@@ -106,7 +110,60 @@ export default function ImagePage() {
 
     useEffect(() => {
         void refreshLogs();
+        void restoreRunningTasks();
+        return () => {
+            slotControllersRef.current.forEach((controller) => controller.abort());
+            slotControllersRef.current.clear();
+        };
     }, []);
+
+    const restoreRunningTasks = async () => {
+        const records = await readImageWorkbenchTasks();
+        if (!records.length) return;
+        const authIdentity = await imageTaskAuthIdentity(effectiveConfig.apiKey);
+        const active = records.filter((record) => record.status === "queued" || record.status === "running" || record.status === "completed");
+        setRunning(true);
+        setResults(records.map((record) => ({ id: record.slotId, status: record.status === "queued" || record.status === "running" || record.status === "completed" ? "pending" : "failed", taskId: record.taskId, taskStatus: record.status, error: record.status === "failed" ? "图片任务失败" : record.status === "canceled" ? "图片任务已取消" : record.status === "expired" ? "图片任务已过期" : undefined })));
+        await Promise.allSettled(active.map((record) => {
+            const index = records.findIndex((item) => item.slotId === record.slotId);
+            if (!canResumeImageTask(record, authIdentity)) {
+                setResults((value) => updateResultAt(value, index, { status: "failed", error: "任务使用其他 API Key 创建，请切换回原 Key 后恢复" }));
+                return Promise.resolve();
+            }
+            return resumeWorkbenchSlot(record, index);
+        }));
+        setRunning(false);
+    };
+
+    const resumeWorkbenchSlot = async (record: ImageWorkbenchTaskRecord, index: number) => {
+        const controller = new AbortController();
+        slotControllersRef.current.set(record.slotId, controller);
+        try {
+            const savedImage = await resumeImageWorkbenchRecord(record, {
+                resumeTask: (taskId, onTask) => resumeImageTask(taskId, effectiveConfig.apiKey, { signal: controller.signal, onTask }),
+                saveAsset: async (image) => {
+                    const stored = await uploadImage(image.dataUrl);
+                    return { id: image.id, url: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+                },
+                saveRecord: saveImageWorkbenchTask,
+                saveLog: async (currentRecord, image) => saveLog({ ...buildLog({
+                    prompt: currentRecord.request.prompt,
+                    model: currentRecord.request.model,
+                    config: { ...effectiveConfig, model: currentRecord.request.model, imageModel: currentRecord.request.model, size: currentRecord.request.size, quality: currentRecord.request.quality, count: "1" },
+                    references: [], durationMs: 0, successCount: 1, failCount: 0, status: "成功",
+                    images: [{ id: image.id, dataUrl: image.url, storageKey: image.storageKey, durationMs: 0, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType }],
+                }), id: currentRecord.logId }),
+                removeRecord: removeImageWorkbenchTask,
+            });
+            const nextImage = { id: savedImage.id, dataUrl: savedImage.url, storageKey: savedImage.storageKey, durationMs: 0, width: savedImage.width, height: savedImage.height, bytes: savedImage.bytes, mimeType: savedImage.mimeType };
+            setResults((value) => updateResultAt(value, index, { status: "success", taskStatus: "completed", image: nextImage }));
+        } catch (error) {
+            if (controller.signal.aborted) return;
+            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "恢复任务失败" }));
+        } finally {
+            slotControllersRef.current.delete(record.slotId);
+        }
+    };
 
     const addReferences = async (files?: FileList | null) => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
@@ -158,26 +215,22 @@ export default function ImagePage() {
         setElapsedMs(0);
         setRunning(true);
         setPreviewLog(null);
-        setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
+        const slots = Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" as const }));
+        setResults(slots);
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
+        const tasks = slots.map((slot, index) => runGenerationSlot(index, slot.id, snapshot));
 
         const result = await Promise.allSettled(tasks);
-        const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
+        const successImages = result.flatMap((item) => item.status === "fulfilled" ? [item.value] : []);
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
 
         try {
-            const logImages = await Promise.all(
-                successImages.map(async (image) => {
-                    const stored = await uploadImage(image.dataUrl);
-                    return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
-                }),
-            );
-            saveLog(
+            const logImages = successImages;
+            await saveLog(
                 buildLog({
                     prompt: text,
                     model,
@@ -190,6 +243,12 @@ export default function ImagePage() {
                     images: logImages,
                 }),
             );
+            await Promise.all(slots.map(async (slot) => {
+                const record = (await readImageWorkbenchTasks()).find((item) => item.slotId === slot.id);
+                if (!record || record.status !== "completed") return;
+                await saveImageWorkbenchTask({ ...record, landingStage: "log_saved" });
+                await removeImageWorkbenchTask(slot.id);
+            }));
             successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
         } finally {
             setRunning(false);
@@ -268,8 +327,9 @@ export default function ImagePage() {
         setDeleteConfirmOpen(false);
     };
 
-    const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+    const saveLog = async (log: GenerationLog) => {
+        await logStore.setItem(log.id, serializeLog(log));
+        await refreshLogs();
     };
 
     const refreshLogs = async () => setLogs(await readStoredLogs());
@@ -300,34 +360,74 @@ export default function ImagePage() {
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (index: number, slotId: string, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
+        const controller = new AbortController();
+        slotControllersRef.current.set(slotId, controller);
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            const onTask = async (task: ImageTask) => {
+                setResults((value) => updateResultAt(value, index, { taskId: task.task_id, taskStatus: task.status }));
+                const authIdentity = await imageTaskAuthIdentity(snapshot.config.apiKey);
+                await saveImageWorkbenchTask({
+                    slotId,
+                    taskId: task.task_id,
+                    status: task.status,
+                    authIdentity,
+                    modelConfigId: task.model_config_id,
+                    request: { prompt: snapshot.text, model: snapshot.config.model, size: snapshot.config.size, quality: snapshot.config.quality, hasReferences: snapshot.references.length > 0 },
+                    resultSlot: index,
+                    createdAt: Date.now(),
+                    landingStage: "result_pending",
+                    logId: `image-task-${task.task_id}`,
+                });
+            };
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, { signal: controller.signal, onTask }) : await requestGeneration(snapshot.config, snapshot.text, { signal: controller.signal, onTask });
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
-            setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
+            const stored = await uploadImage(image.dataUrl);
+            const nextImage = { id: image.id, dataUrl: stored.url, storageKey: stored.storageKey, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: stored.bytes, mimeType: stored.mimeType };
+            setResults((value) => updateResultAt(value, index, { status: "success", taskStatus: "completed", image: nextImage }));
+            const storedRecord = (await readImageWorkbenchTasks()).find((record) => record.slotId === slotId);
+            if (storedRecord) await saveImageWorkbenchTask({ ...storedRecord, status: "completed", landingStage: "assets_saved", savedImage: { id: image.id, url: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType } });
             return nextImage;
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : "生成失败" }));
+            if (controller.signal.aborted) throw error;
+            setResults((value) => updateResultAt(value, index, { status: "failed", taskStatus: "failed", error: error instanceof Error ? error.message : "生成失败" }));
             throw error;
+        } finally {
+            slotControllersRef.current.delete(slotId);
         }
+    };
+
+    const cancelResult = async (index: number) => {
+        const result = results[index];
+        if (!result?.taskId || (result.taskStatus !== "queued" && result.taskStatus !== "running")) return;
+        const task = await cancelImageTask(result.taskId, effectiveConfig.apiKey);
+        const resolution = resolveImageTaskCancel(task);
+        const record = (await readImageWorkbenchTasks()).find((item) => item.slotId === result.id);
+        if (record) await saveImageWorkbenchTask({ ...record, status: task.status, landingStage: "result_pending" });
+        if (resolution.action === "recover") {
+            setResults((value) => updateResultAt(value, index, { status: "pending", taskStatus: "completed", error: undefined }));
+            return;
+        }
+        slotControllersRef.current.get(result.id)?.abort();
+        slotControllersRef.current.delete(result.id);
+        setResults((value) => updateResultAt(value, index, { status: "failed", taskStatus: task.status, error: resolution.message }));
     };
 
     const retryResult = async (index: number) => {
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
         setPreviewLog(null);
-        setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
+        const slotId = nanoid();
+        setResults((value) => value.map((item, itemIndex) => (itemIndex === index ? { id: slotId, status: "pending" } : item)));
         const retryStartedAt = performance.now();
         try {
-            const image = await runGenerationSlot(index, snapshot);
-            const stored = await uploadImage(image.dataUrl);
-            const logImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
-            setResults((value) => updateResultAt(value, index, { image: { ...image, dataUrl: stored.url, storageKey: stored.storageKey } }));
-            saveLog(
+            const image = await runGenerationSlot(index, slotId, snapshot);
+            const logImage = image;
+            setResults((value) => updateResultAt(value, index, { image }));
+            await saveLog(
                 buildLog({
                     prompt: snapshot.text,
                     model,
@@ -340,6 +440,11 @@ export default function ImagePage() {
                     images: [logImage],
                 }),
             );
+            const record = (await readImageWorkbenchTasks()).find((item) => item.slotId === slotId);
+            if (record) {
+                await saveImageWorkbenchTask({ ...record, status: "completed", landingStage: "log_saved" });
+                await removeImageWorkbenchTask(slotId);
+            }
             message.success("重试成功");
         } catch {
             // runGenerationSlot 已经把结果状态更新为 failed
@@ -470,7 +575,7 @@ export default function ImagePage() {
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} />
+                                        <PendingImageCard key={result.id} status={result.taskStatus} onCancel={result.taskId ? () => void cancelResult(index) : undefined} />
                                     ),
                                 )}
                             </div>
@@ -581,7 +686,7 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({ status, onCancel }: { status?: ImageTaskStatus; onCancel?: () => void }) {
     return (
         <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
             <div
@@ -593,7 +698,8 @@ function PendingImageCard() {
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
-                <span>生成中</span>
+                <span>{status === "queued" ? "排队中" : "生成中"}</span>
+                {onCancel ? <Button size="small" danger icon={<Square className="size-3.5" />} onClick={onCancel}>停止</Button> : null}
             </div>
         </div>
     );

@@ -57,6 +57,14 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    imageTaskId?: string;
+    imageTaskStatus?: "queued" | "running" | "completed" | "failed" | "canceled" | "expired";
+    imageTaskModelConfigId?: number;
+    imageTaskAuthIdentity?: string;
+    videoTaskId?: string;
+    videoTaskStatus?: "queued" | "running" | "completed" | "failed" | "canceled" | "cancelled" | "expired";
+    videoTaskModelConfigId?: number;
+    videoTaskAuthIdentity?: string;
     groupId?: string;
 };
 

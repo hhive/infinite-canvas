@@ -1,8 +1,7 @@
 import axios from "axios";
 
-import { buildApiUrl, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
-import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
@@ -19,10 +18,7 @@ type ResponseToolCall = {
     thoughtSignature?: string;
 };
 
-type ResponseInputMessage =
-    | AiTextMessage
-    | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
-    | { role: "tool"; tool_call_id: string; content: string };
+type ResponseInputMessage = AiTextMessage | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { role: "tool"; tool_call_id: string; content: string };
 
 type ResponseFunctionTool = {
     type: "function";
@@ -42,10 +38,7 @@ type ToolResponseResult = {
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
 type ResponseMessageContent = AiTextMessage["content"] | string;
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
-type ResponseInputItem =
-    | { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] }
-    | { type: "function_call"; call_id: string; name: string; arguments: string }
-    | { type: "function_call_output"; call_id: string; output: string };
+type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = {
     type: "function";
     name: string;
@@ -53,9 +46,7 @@ type ResponseApiToolDefinition = {
     parameters: Record<string, unknown>;
     strict?: boolean;
 };
-type ResponseApiOutputItem =
-    | { type?: "message"; content?: Array<{ type?: string; text?: string }> }
-    | { type?: "function_call"; id?: string; call_id?: string; name?: string; arguments?: string };
+type ResponseApiOutputItem = { type?: "message"; content?: Array<{ type?: string; text?: string }> } | { type?: "function_call"; id?: string; call_id?: string; name?: string; arguments?: string };
 type ResponseApiPayload = {
     id?: string;
     output?: ResponseApiOutputItem[];
@@ -90,7 +81,99 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
+export type ImageTaskRequestOptions = { signal?: AbortSignal; onTask?: (task: ImageTask) => void | Promise<void> };
 type RequestOptions = { signal?: AbortSignal };
+
+export type ImageTaskStatus = "queued" | "running" | "completed" | "failed" | "canceled" | "expired";
+export type ImageTask = {
+    task_id: string;
+    status: ImageTaskStatus;
+    model_config_id: number;
+    model: string;
+    poll_after_ms: number;
+    result?: ImageApiResponse;
+    error_code?: string;
+    error_message?: string;
+};
+
+const imageModelConfigIDs = new Map<string, number>();
+const IMAGE_TASK_PATH = "/v1/images/generations";
+
+function sameOriginHeaders(apiKey: string) {
+    return apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined;
+}
+
+async function submitImageTask(config: AiConfig, body: Record<string, unknown>, options?: ImageTaskRequestOptions) {
+    const response = await axios.post<ImageTask>(IMAGE_TASK_PATH, { ...body, async: true }, { headers: sameOriginHeaders(config.apiKey), signal: options?.signal, withCredentials: true });
+    return response.data;
+}
+
+export async function getImageTask(taskId: string, apiKey = "", signal?: AbortSignal) {
+    const response = await axios.get<ImageTask>(`${IMAGE_TASK_PATH}/${encodeURIComponent(taskId)}`, { headers: sameOriginHeaders(apiKey), signal, withCredentials: true });
+    return response.data;
+}
+
+export async function cancelImageTask(taskId: string, apiKey = "") {
+    const response = await axios.post<ImageTask>(`${IMAGE_TASK_PATH}/${encodeURIComponent(taskId)}/cancel`, undefined, { headers: sameOriginHeaders(apiKey), withCredentials: true });
+    return response.data;
+}
+
+export async function probeImageSession(apiKey = "") {
+    try {
+        await axios.get("/api/me", { headers: sameOriginHeaders(apiKey), withCredentials: true });
+        return true;
+    } catch (error) {
+        if (axios.isAxiosError(error) && (error.response?.status === 401 || error.response?.status === 403)) return false;
+        throw new Error(readAxiosError(error, "检查登录状态失败"));
+    }
+}
+
+export async function waitForImageTask(task: ImageTask, apiKey: string, options?: ImageTaskRequestOptions) {
+    let current = task;
+    let transientFailures = 0;
+    await options?.onTask?.(current);
+    while (current.status === "queued" || current.status === "running") {
+        const delay = Math.max(500, Math.min(15000, current.poll_after_ms || 10000));
+        await new Promise<void>((resolve, reject) => {
+            const timer = window.setTimeout(resolve, delay);
+            options?.signal?.addEventListener(
+                "abort",
+                () => {
+                    window.clearTimeout(timer);
+                    reject(new DOMException("本地轮询已停止", "AbortError"));
+                },
+                { once: true },
+            );
+        });
+        try {
+            current = await getImageTask(current.task_id, apiKey, options?.signal);
+            transientFailures = 0;
+            await options?.onTask?.(current);
+        } catch (error) {
+            if (options?.signal?.aborted) throw error;
+            transientFailures++;
+            if (transientFailures >= 3) throw error;
+        }
+    }
+    if (current.status !== "completed") throw new Error(current.error_message || `图片任务已${current.status === "canceled" ? "取消" : current.status === "expired" ? "过期" : "失败"}`);
+    return parseImagePayload(current.result || {});
+}
+
+export async function resumeImageTask(taskId: string, apiKey = "", options?: ImageTaskRequestOptions) {
+    const task = await getImageTask(taskId, apiKey, options?.signal);
+    return waitForImageTask(task, apiKey, options);
+}
+
+async function modelConfigID(model: string, config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
+    const modelName = modelOptionName(model);
+    let id = imageModelConfigIDs.get(modelName);
+    if (!id) {
+        await fetchImageModels(config);
+        id = imageModelConfigIDs.get(modelName);
+    }
+    if (!id) throw new Error(`当前模型 ${modelName} 没有可用的图片站配置`);
+    return id;
+}
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -458,12 +541,7 @@ async function requestStreamingResponse(config: AiConfig, body: Record<string, u
 }
 
 function toGeminiBody(config: AiConfig, messages: ResponseInputMessage[], extra?: Record<string, unknown>) {
-    const systemText = [
-        config.systemPrompt.trim(),
-        ...messages.flatMap((message) => (!("type" in message) && message.role === "system" ? [geminiTextContent(message.content)] : [])),
-    ]
-        .filter(Boolean)
-        .join("\n\n");
+    const systemText = [config.systemPrompt.trim(), ...messages.flatMap((message) => (!("type" in message) && message.role === "system" ? [geminiTextContent(message.content)] : []))].filter(Boolean).join("\n\n");
     const contents = toGeminiContents(messages.filter((message) => ("type" in message ? true : message.role !== "system")));
     return {
         contents,
@@ -523,10 +601,7 @@ function toGeminiToolOptions(tools: ResponseFunctionTool[], toolChoice: ToolChoi
         description: tool.function.description,
         parameters: tool.function.parameters,
     }));
-    const functionCallingConfig =
-        typeof toolChoice === "object"
-            ? { mode: "ANY", allowedFunctionNames: [toolChoice.name] }
-            : { mode: toolChoice === "required" ? "ANY" : "AUTO" };
+    const functionCallingConfig = typeof toolChoice === "object" ? { mode: "ANY", allowedFunctionNames: [toolChoice.name] } : { mode: toolChoice === "required" ? "ANY" : "AUTO" };
     return {
         tools: [{ functionDeclarations }],
         toolConfig: { functionCallingConfig },
@@ -648,76 +723,56 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
     return images;
 }
 
-export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+export async function requestGeneration(config: AiConfig, prompt: string, options?: ImageTaskRequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    if (requestConfig.apiFormat === "gemini") {
-        try {
-            return await requestGeminiImages(requestConfig, prompt, [], n, options);
-        } catch (error) {
-            throw new Error(readAxiosError(error, "请求失败"));
-        }
-    }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     try {
-        const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
+        const modelConfigId = await modelConfigID(requestConfig.model, requestConfig);
+        const task = await submitImageTask(
+            requestConfig,
             {
-                model: requestConfig.model,
+                model_config_id: modelConfigId,
                 prompt: withSystemPrompt(requestConfig, prompt),
                 n,
-                ...(quality ? { quality } : {}),
+                ...(quality ? { size_tier: quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
-                response_format: "b64_json",
                 output_format: IMAGE_OUTPUT_FORMAT,
             },
-            {
-                headers: aiHeaders(requestConfig, "application/json"),
-                signal: options?.signal,
-            },
+            options,
         );
-        const images = parseImagePayload(response.data);
-        return images;
+        return await waitForImageTask(task, requestConfig.apiKey, options);
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
 }
 
-export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
+export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: ImageTaskRequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
-    if (requestConfig.apiFormat === "gemini") {
-        if (mask) throw new Error("Gemini 调用格式暂不支持蒙版编辑");
-        try {
-            return await requestGeminiImages(requestConfig, requestPrompt, references, n, options);
-        } catch (error) {
-            throw new Error(readAxiosError(error, "请求失败"));
-        }
-    }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
-    const formData = new FormData();
-    formData.set("model", requestConfig.model);
-    formData.set("prompt", withSystemPrompt(requestConfig, requestPrompt));
-    formData.set("n", String(n));
-    formData.set("response_format", "b64_json");
-    formData.set("output_format", IMAGE_OUTPUT_FORMAT);
-    if (quality) {
-        formData.set("quality", quality);
-    }
-    if (requestSize) {
-        formData.set("size", requestSize);
-    }
-    const files = await Promise.all(references.map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
-    files.forEach((file) => formData.append("image", file));
-    if (mask) formData.set("mask", dataUrlToFile(mask));
-
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), formData, { headers: aiHeaders(requestConfig), signal: options?.signal });
-        const images = parseImagePayload(response.data);
-        return images;
+        const modelConfigId = await modelConfigID(requestConfig.model, requestConfig);
+        const inputImages = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        const maskImage = mask ? await imageToDataUrl(mask) : undefined;
+        const task = await submitImageTask(
+            requestConfig,
+            {
+                model_config_id: modelConfigId,
+                prompt: withSystemPrompt(requestConfig, requestPrompt),
+                n,
+                ...(quality ? { size_tier: quality } : {}),
+                ...(requestSize ? { size: requestSize } : {}),
+                output_format: IMAGE_OUTPUT_FORMAT,
+                input_images: inputImages,
+                ...(maskImage ? { mask_image: maskImage } : {}),
+            },
+            options,
+        );
+        return await waitForImageTask(task, requestConfig.apiKey, options);
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
@@ -731,10 +786,18 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             if (answer === "没有返回内容") onDelta(answer);
             return answer;
         }
-        const answer = (await requestStreamingResponse(requestConfig, {
-            model: requestConfig.model,
-            input: toResponseInput(withSystemMessage(requestConfig, messages)),
-        }, onDelta, options)).content || "没有返回内容";
+        const answer =
+            (
+                await requestStreamingResponse(
+                    requestConfig,
+                    {
+                        model: requestConfig.model,
+                        input: toResponseInput(withSystemMessage(requestConfig, messages)),
+                    },
+                    onDelta,
+                    options,
+                )
+            ).content || "没有返回内容";
         if (answer === "没有返回内容") onDelta(answer);
         return answer;
     } catch (error) {
@@ -744,23 +807,10 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {
-        if (config.apiFormat === "gemini") {
-            const response = await axios.get<GeminiPayload>(geminiApiUrl({ ...defaultGeminiConfig, ...config }), { headers: geminiHeaders({ ...defaultGeminiConfig, ...config }) });
-            validateGeminiPayload(response.data);
-            return (response.data.models || [])
-                .map((model) => model.name?.replace(/^models\//, ""))
-                .filter((id): id is string => Boolean(id))
-                .sort((a, b) => a.localeCompare(b));
-        }
-        const response = await axios.get<{ data?: Array<{ id?: string }>; error?: { message?: string } }>(buildApiUrl(config.baseUrl, "/models"), {
-            headers: {
-                Authorization: `Bearer ${config.apiKey}`,
-            },
-        });
-        return (response.data.data || [])
-            .map((model) => model.id)
-            .filter((id): id is string => Boolean(id))
-            .sort((a, b) => a.localeCompare(b));
+        const response = await axios.get<Array<{ id: number; model: string }>>("/v1/models", { headers: sameOriginHeaders(config.apiKey), withCredentials: true });
+        imageModelConfigIDs.clear();
+        response.data.forEach((item) => imageModelConfigIDs.set(item.model, item.id));
+        return response.data.map((model) => model.model).sort((a, b) => a.localeCompare(b));
     } catch (error) {
         throw new Error(readAxiosError(error, "读取模型失败"));
     }

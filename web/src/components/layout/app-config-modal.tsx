@@ -1,14 +1,15 @@
 import { App, Button, Form, Input, Modal, Progress, Select, Switch, Tabs } from "antd";
-import { CircleAlert, Cloud, KeyRound, Link2, Plus, RefreshCw, ShieldCheck, Trash2, Wifi } from "lucide-react";
+import { CircleAlert, Cloud, KeyRound, Link2, RefreshCw, ShieldCheck, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
 import { fetchChannelModels } from "@/services/api/image";
+import { fetchMediaModels, type MediaCapability } from "@/services/api/media-models";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { useAgentStore } from "@/stores/use-agent-store";
-import { createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -31,11 +32,6 @@ const modelGroups: ModelGroup[] = [
     { capability: "video", modelKey: "videoModel", modelsKey: "videoModels", defaultLabel: "默认视频模型", optionsLabel: "视频模型可选项" },
     { capability: "text", modelKey: "textModel", modelsKey: "textModels", defaultLabel: "默认文本模型", optionsLabel: "文本模型可选项" },
     { capability: "audio", modelKey: "audioModel", modelsKey: "audioModels", defaultLabel: "默认音频模型", optionsLabel: "音频模型可选项" },
-];
-
-const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
-    { label: "OpenAI", value: "openai" },
-    { label: "Gemini", value: "gemini" },
 ];
 
 const webdavDomainKeys: AppSyncDomainKey[] = ["canvas", "assets", "image-workbench", "video-workbench"];
@@ -77,6 +73,13 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
+    const mediaModels = useConfigStore((state) => state.mediaModels);
+    const mediaModelStatus = useConfigStore((state) => state.mediaModelStatus);
+    const mediaModelErrors = useConfigStore((state) => state.mediaModelErrors);
+    const mediaModelsRefreshedAt = useConfigStore((state) => state.mediaModelsRefreshedAt);
+    const applyMediaModels = useConfigStore((state) => state.applyMediaModels);
+    const setMediaModelsError = useConfigStore((state) => state.setMediaModelsError);
+    const setMediaModelsLoading = useConfigStore((state) => state.setMediaModelsLoading);
     const agentUrl = useAgentStore((state) => state.url);
     const agentToken = useAgentStore((state) => state.token);
     const agentConnected = useAgentStore((state) => state.connected);
@@ -96,7 +99,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     };
 
     const finishConfig = () => {
-        const ready = config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && channel.models.length);
+        const ready = config.channels.some((channel) => channel.models.length);
         setConfigDialogOpen(false);
         if (!ready) return;
         message.success(shouldPromptContinue ? "配置已保存，请继续刚才的请求" : "配置已保存");
@@ -112,28 +115,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
         updateChannels(config.channels.map((channel) => (channel.id === id ? { ...channel, ...patch, models: patch.models ? uniqueModels(patch.models) : channel.models } : channel)));
     };
 
-    const updateChannelApiFormat = (channel: ModelChannel, apiFormat: ApiCallFormat) => {
-        const baseUrl = !channel.baseUrl.trim() || channel.baseUrl.trim() === defaultBaseUrlForApiFormat(channel.apiFormat) ? defaultBaseUrlForApiFormat(apiFormat) : channel.baseUrl;
-        updateChannel(channel.id, { apiFormat, baseUrl });
-    };
-
-    const addChannel = () => {
-        updateChannels([...config.channels, createModelChannel({ name: `渠道 ${config.channels.length + 1}` })]);
-    };
-
-    const deleteChannel = (id: string) => {
-        if (config.channels.length <= 1) {
-            message.warning("至少保留一个渠道");
-            return;
-        }
-        updateChannels(config.channels.filter((channel) => channel.id !== id));
-    };
-
     const refreshChannelModels = async (channel: ModelChannel) => {
-        if (!channel.baseUrl.trim() || !channel.apiKey.trim()) {
-            message.error("请先填写该渠道的 Base URL 和 API Key");
-            return;
-        }
         setLoadingChannelId(channel.id);
         try {
             const models = await fetchChannelModels(channel);
@@ -147,11 +129,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     };
 
     const refreshAllModels = async () => {
-        const runnable = config.channels.filter((channel) => channel.baseUrl.trim() && channel.apiKey.trim());
-        if (!runnable.length) {
-            message.error("请先填写至少一个渠道的 Base URL 和 API Key");
-            return;
-        }
+        const runnable = config.channels;
         setLoadingChannelId("all");
         try {
             const entries = await Promise.all(runnable.map(async (channel) => [channel.id, await fetchChannelModels(channel)] as const));
@@ -169,6 +147,19 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
         const next = uniqueModels(models.map((model) => normalizeModelOptionValue(model, config.channels)).filter(Boolean));
         updateConfig(group.modelsKey, next);
         if (!next.includes(config[group.modelKey])) updateConfig(group.modelKey, next[0] || "");
+    };
+
+    const refreshMediaModels = async (capability: MediaCapability) => {
+        setMediaModelsLoading(capability);
+        try {
+            const models = await fetchMediaModels(capability, config.channels[0]?.apiKey || config.apiKey);
+            applyMediaModels(capability, models);
+            message.success(`${capability === "image" ? "图片" : "视频"}模型已同步`);
+        } catch (error) {
+            const text = error instanceof Error ? error.message : "读取媒体模型失败";
+            setMediaModelsError(capability, text);
+            message.error(text);
+        }
     };
 
     const testWebdav = async () => {
@@ -256,9 +247,6 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                         <Button icon={<RefreshCw className="size-4" />} loading={Boolean(loadingChannelId)} onClick={() => void refreshAllModels()}>
                                             拉取全部
                                         </Button>
-                                        <Button type="primary" icon={<Plus className="size-4" />} onClick={addChannel}>
-                                            新增渠道
-                                        </Button>
                                     </div>
                                 </div>
                                 <div className="space-y-3">
@@ -268,25 +256,18 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                                 <div className="min-w-0">
                                                     <div className="truncate text-sm font-semibold">{channel.name || "未命名渠道"}</div>
                                                     <div className="mt-1 text-xs text-stone-500">
-                                                        {apiFormatLabel(channel.apiFormat)} · 已保存 {channel.models.length} 个模型
+                                                        同源图片服务 · 已保存 {channel.models.length} 个模型
                                                     </div>
                                                 </div>
                                                 <div className="flex shrink-0 gap-2">
                                                     <Button size="small" loading={loadingChannelId === channel.id} onClick={() => void refreshChannelModels(channel)}>
                                                         拉取模型
                                                     </Button>
-                                                    <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteChannel(channel.id)} />
                                                 </div>
                                             </div>
                                             <div className="grid gap-4 md:grid-cols-2">
                                                 <Form.Item label="渠道名称" className="mb-0">
                                                     <Input value={channel.name} onChange={(event) => updateChannel(channel.id, { name: event.target.value })} />
-                                                </Form.Item>
-                                                <Form.Item label="调用格式" className="mb-0">
-                                                    <Select value={channel.apiFormat} options={apiFormatOptions} onChange={(value: ApiCallFormat) => updateChannelApiFormat(channel, value)} />
-                                                </Form.Item>
-                                                <Form.Item label="Base URL" className="mb-0">
-                                                    <Input value={channel.baseUrl} onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })} />
                                                 </Form.Item>
                                                 <Form.Item label="API Key" className="mb-0">
                                                     <Input.Password value={channel.apiKey} onChange={(event) => updateChannel(channel.id, { apiKey: event.target.value })} />
@@ -308,10 +289,30 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                             <Form layout="vertical" requiredMark={false}>
                                 <div className="mb-4 rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                                     <div className="text-sm font-semibold">默认模型和可选项</div>
-                                    <div className="mt-1 text-xs leading-5 text-stone-500">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的渠道名区分。</div>
+                                    <div className="mt-1 text-xs leading-5 text-stone-500">图片和视频模型由统一媒体站配置同步；文本和音频模型仍由本地渠道配置。</div>
                                 </div>
                                 <div className="grid gap-4 md:grid-cols-2">
-                                    {modelGroups.map((group) => (
+                                    {(["image", "video"] as MediaCapability[]).map((capability) => (
+                                        <section key={capability} className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div>
+                                                    <div className="text-sm font-semibold">{capability === "image" ? "图片模型" : "视频模型"}</div>
+                                                    <div className="mt-1 text-xs text-stone-500">
+                                                        媒体站已同步 {mediaModels[capability].length} 个
+                                                        {mediaModelsRefreshedAt[capability] ? ` · ${new Date(mediaModelsRefreshedAt[capability]).toLocaleString()}` : ""}
+                                                    </div>
+                                                </div>
+                                                <Button size="small" icon={<RefreshCw className="size-3.5" />} loading={mediaModelStatus[capability] === "loading"} onClick={() => void refreshMediaModels(capability)}>
+                                                    刷新
+                                                </Button>
+                                            </div>
+                                            {mediaModelErrors[capability] ? <div className="mt-2 text-xs text-red-600">{mediaModelErrors[capability]}</div> : null}
+                                            <div className="mt-2 text-xs text-stone-600 dark:text-stone-300">
+                                                {mediaModels[capability].length ? mediaModels[capability].map((item) => item.displayName).join("、") : mediaModelStatus[capability] === "loading" ? "正在读取模型" : "暂无可用模型"}
+                                            </div>
+                                        </section>
+                                    ))}
+                                    {modelGroups.filter((group) => group.capability === "text" || group.capability === "audio").map((group) => (
                                         <Form.Item key={group.modelsKey} label={group.optionsLabel} className="mb-0">
                                             <Select
                                                 mode="tags"
@@ -564,9 +565,6 @@ function uniqueModels(models: string[]) {
     return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));
 }
 
-function apiFormatLabel(apiFormat: ApiCallFormat) {
-    return apiFormat === "gemini" ? "Gemini" : "OpenAI";
-}
 
 function formatWebdavTime(value: string) {
     return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });

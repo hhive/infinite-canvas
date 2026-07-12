@@ -3,6 +3,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
+import type { MediaCapability, MediaModel } from "@/services/api/media-models";
+
 export type ApiCallFormat = "openai" | "gemini";
 
 export type ModelChannel = {
@@ -59,6 +61,7 @@ export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+export const SAME_ORIGIN_API_BASE_URL = window.location.origin;
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -76,8 +79,8 @@ export const defaultConfig: AiConfig = {
         },
     ],
     model: "default::gpt-image-2",
-    imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
+    imageModel: "",
+    videoModel: "",
     textModel: "default::gpt-5.5",
     audioModel: "default::gpt-4o-mini-tts",
     audioVoice: "alloy",
@@ -90,8 +93,8 @@ export const defaultConfig: AiConfig = {
     videoWatermark: "false",
     systemPrompt: "",
     models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
-    imageModels: ["default::gpt-image-2"],
-    videoModels: ["default::grok-imagine-video"],
+    imageModels: [],
+    videoModels: [],
     textModels: ["default::gpt-5.5"],
     audioModels: ["default::gpt-4o-mini-tts"],
     quality: "auto",
@@ -114,12 +117,20 @@ type ConfigStore = {
     isConfigOpen: boolean;
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
+    mediaModels: Record<MediaCapability, MediaModel[]>;
+    mediaModelStatus: Record<MediaCapability, "idle" | "loading" | "ready" | "error">;
+    mediaModelErrors: Record<MediaCapability, string>;
+    mediaModelsRefreshedAt: Record<MediaCapability, string>;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
+    clearAPIKeys: () => void;
+    setMediaModelsLoading: (capability: MediaCapability) => void;
+    setMediaModelsError: (capability: MediaCapability, error: string, clear?: boolean) => void;
+    applyMediaModels: (capability: MediaCapability, models: MediaModel[]) => void;
 };
 
 function isVideoModelName(model: string) {
@@ -129,7 +140,20 @@ function isVideoModelName(model: string) {
 
 function isImageModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return !isVideoModelName(model) && !isAudioModelName(model) && (value.includes("seedream") || value.includes("gpt-image") || value.includes("image") || value.includes("dall-e") || value.includes("dalle") || value.includes("imagen") || value.includes("flux") || value.includes("sdxl") || value.includes("stable-diffusion") || value.includes("midjourney"));
+    return (
+        !isVideoModelName(model) &&
+        !isAudioModelName(model) &&
+        (value.includes("seedream") ||
+            value.includes("gpt-image") ||
+            value.includes("image") ||
+            value.includes("dall-e") ||
+            value.includes("dalle") ||
+            value.includes("imagen") ||
+            value.includes("flux") ||
+            value.includes("sdxl") ||
+            value.includes("stable-diffusion") ||
+            value.includes("midjourney"))
+    );
 }
 
 function isAudioModelName(model: string) {
@@ -164,7 +188,7 @@ function modelListKey(capability: ModelCapability) {
 
 function isAiConfigReady(config: AiConfig, model: string) {
     const channel = resolveModelChannel(config, model);
-    return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
+    return Boolean(model.trim() && channel.models.length);
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -175,6 +199,10 @@ export const useConfigStore = create<ConfigStore>()(
             isConfigOpen: false,
             configTab: "channels",
             shouldPromptContinue: false,
+            mediaModels: { image: [], video: [] },
+            mediaModelStatus: { image: "idle", video: "idle" },
+            mediaModelErrors: { image: "", video: "" },
+            mediaModelsRefreshedAt: { image: "", video: "" },
             updateConfig: (key, value) =>
                 set((state) => ({
                     config: {
@@ -193,6 +221,44 @@ export const useConfigStore = create<ConfigStore>()(
             openConfigDialog: (shouldPromptContinue = false, configTab = "channels") => set({ isConfigOpen: true, shouldPromptContinue, configTab }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
+            clearAPIKeys: () =>
+                set((state) => ({
+                    config: {
+                        ...state.config,
+                        apiKey: "",
+                        channels: state.config.channels.map((channel) => ({ ...channel, apiKey: "" })),
+                    },
+                })),
+            setMediaModelsLoading: (capability) =>
+                set((state) => ({
+                    mediaModelStatus: { ...state.mediaModelStatus, [capability]: "loading" },
+                    mediaModelErrors: { ...state.mediaModelErrors, [capability]: "" },
+                })),
+            setMediaModelsError: (capability, error, clear = false) =>
+                set((state) => ({
+                    mediaModels: clear ? { ...state.mediaModels, [capability]: [] } : state.mediaModels,
+                    mediaModelStatus: { ...state.mediaModelStatus, [capability]: "error" },
+                    mediaModelErrors: { ...state.mediaModelErrors, [capability]: error },
+                })),
+            applyMediaModels: (capability, mediaModels) =>
+                set((state) => {
+                    const firstChannel = state.config.channels[0] || createModelChannel({ id: "default", name: "默认渠道" });
+                    const options = mediaModels.map((item) => encodeChannelModel(firstChannel.id, item.model));
+                    const modelKey = capability === "image" ? "imageModel" : "videoModel";
+                    const modelsKey = capability === "image" ? "imageModels" : "videoModels";
+                    const selected = options.includes(state.config[modelKey]) ? state.config[modelKey] : options[0] || "";
+                    const channels = [
+                        { ...firstChannel, models: uniqueRawModels([...firstChannel.models, ...mediaModels.map((item) => item.model)]) },
+                        ...state.config.channels.slice(1),
+                    ];
+                    return {
+                        config: { ...state.config, channels, models: modelOptionsFromChannels(channels), [modelsKey]: options, [modelKey]: selected },
+                        mediaModels: { ...state.mediaModels, [capability]: mediaModels },
+                        mediaModelStatus: { ...state.mediaModelStatus, [capability]: "ready" },
+                        mediaModelErrors: { ...state.mediaModelErrors, [capability]: "" },
+                        mediaModelsRefreshedAt: { ...state.mediaModelsRefreshedAt, [capability]: new Date().toISOString() },
+                    };
+                }),
         }),
         {
             name: CONFIG_STORE_KEY,
@@ -214,8 +280,8 @@ export const useConfigStore = create<ConfigStore>()(
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
                         models,
-                        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-                        videoModel: normalizeModelOptionValue(config.videoModel || "grok-imagine-video", channels),
+                        imageModel: normalizeModelOptionValue(config.imageModel || "", channels),
+                        videoModel: normalizeModelOptionValue(config.videoModel || "", channels),
                         textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
@@ -255,7 +321,7 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
     return {
         id: channel?.id?.trim() || nanoid(),
         name: channel?.name?.trim() || "新渠道",
-        baseUrl: channel?.baseUrl?.trim() || defaultBaseUrlForApiFormat(apiFormat),
+        baseUrl: SAME_ORIGIN_API_BASE_URL,
         apiKey: channel?.apiKey || "",
         apiFormat,
         models: uniqueRawModels(channel?.models || []),
@@ -315,7 +381,7 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
     return {
         ...config,
         model: modelOptionName(value || config.model),
-        baseUrl: channel.baseUrl,
+        baseUrl: SAME_ORIGIN_API_BASE_URL,
         apiKey: channel.apiKey,
         apiFormat: channel.apiFormat,
     };
@@ -339,18 +405,11 @@ function normalizeChannels(config: AiConfig) {
                 baseUrl: config.baseUrl || defaultConfig.baseUrl,
                 apiKey: config.apiKey || "",
                 apiFormat: config.apiFormat || defaultConfig.apiFormat,
-                models: uniqueRawModels([
-                    ...(config.models || []),
-                    config.model,
-                    config.imageModel,
-                    config.videoModel,
-                    config.textModel,
-                    config.audioModel,
-                ]),
+                models: uniqueRawModels([...(config.models || []), config.model, config.imageModel, config.videoModel, config.textModel, config.audioModel]),
             }),
         );
     }
-    return channels.map((channel) => ({ ...channel, models: uniqueRawModels(channel.models) }));
+    return channels.map((channel): ModelChannel => ({ ...channel, baseUrl: SAME_ORIGIN_API_BASE_URL, apiFormat: "openai", models: uniqueRawModels(channel.models) }));
 }
 
 export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {

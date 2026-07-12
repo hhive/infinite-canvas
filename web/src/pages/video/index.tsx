@@ -99,7 +99,7 @@ export default function VideoPage() {
     const clearVideoCommand = useWorkbenchAgentStore((state) => state.clearVideoCommand);
     const processedCommandRef = useRef(0);
 
-    const model = effectiveConfig.videoModel || effectiveConfig.model;
+    const model = effectiveConfig.videoModel;
     const canGenerate = Boolean(prompt.trim());
 
     useEffect(() => {
@@ -332,7 +332,7 @@ export default function VideoPage() {
                 }
                 if (state.status === "failed") throw new Error(state.error);
                 if (attempt === 119) throw new Error("视频生成超时，请稍后重试");
-                await delay(log.task.provider === "seedance" ? 5000 : 2500);
+                await delay(log.task.pollAfterMs || 5000);
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "生成失败";

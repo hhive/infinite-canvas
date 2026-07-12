@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [调整] 图片生成与编辑改用同源图片站异步任务接口，保留 API Key 导入和手动配置并移除 Base URL 配置。
+
 + [优化] 本地 Agent 连接说明明确区分插件 / 手动 MCP 才会增加 Codex token 消耗，直接运行 Agent 不受影响。
 + [优化] 优化本地 Agent 连接说明，区分 Codex 插件启动和直接运行 Agent 两种方式。
 + [新增] Agent 对话消息改用 streamdown 流式渲染，提升长回复与 Markdown 内容展示效果。
