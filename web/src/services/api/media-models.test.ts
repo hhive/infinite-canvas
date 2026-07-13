@@ -25,8 +25,8 @@ describe("fetchMediaModels", () => {
     });
 
     it("accepts video responses without a redundant media_type field", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "video-ds-2.0", api_mode: "seedance_content_generation" }] });
-        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "video-ds-2.0", apiMode: "seedance_content_generation" }]);
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "openai_videos_v2" }] });
+        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "openai_videos_v2" }]);
     });
 
     it("rejects a non-array response", async () => {

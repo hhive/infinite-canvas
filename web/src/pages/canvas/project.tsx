@@ -7,8 +7,9 @@ import { saveAs } from "file-saver";
 import { cancelImageTask, requestEdit, requestGeneration, requestImageQuestion, resumeImageTask, type ImageTask } from "@/services/api/image";
 import { imageTaskAuthIdentity, matchesImageTaskAuthIdentity } from "@/services/image-task-storage";
 import { applyImageTaskTerminalStatus, canCancelImageTaskStatus, cancelImageTaskBatch, cancelImageTaskRequest, resetInterruptedImageGeneration, resumeCanvasImageTasks } from "@/lib/canvas/image-task-recovery";
+import { normalizeInterruptedVideoGeneration, resumeCanvasVideoTasks } from "@/lib/canvas/video-task-recovery";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
-import { cancelVideoGenerationTask, requestVideoGeneration, resumeVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { cancelVideoGenerationTask, requestVideoGeneration, resumeVideoGenerationTask, storeGeneratedVideo, type VideoGenerationResult, type VideoGenerationTask } from "@/services/api/video";
 import { DOCS_URL } from "@/constant/env";
 import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
@@ -460,7 +461,7 @@ function InfiniteCanvasPage() {
         }
 
         const restore = async () => {
-            const restoredNodes = await hydrateCanvasImages(resetInterruptedImageGeneration(project.nodes));
+            const restoredNodes = await hydrateCanvasImages(normalizeInterruptedVideoGeneration(resetInterruptedImageGeneration(project.nodes)));
             const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
             setNodes(restoredNodes);
             setConnections(project.connections);
@@ -483,24 +484,21 @@ function InfiniteCanvasPage() {
                 onIdentityMismatch: (node) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: "任务使用其他 API Key 创建，请切换回原 Key 后恢复" } } : item)),
                 onError: (node, error) => setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: error instanceof Error ? error.message : "恢复任务失败" } } : item))),
             });
-            const videoAuthIdentity = await imageTaskAuthIdentity(effectiveConfig.apiKey);
-            restoredNodes.filter((node) => node.type === CanvasNodeType.Video && node.metadata?.videoTaskId && ["queued", "running"].includes(node.metadata.videoTaskStatus || "")).forEach((node) => {
-                if (node.metadata?.videoTaskAuthIdentity && node.metadata.videoTaskAuthIdentity !== videoAuthIdentity) {
-                    setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: "视频任务使用其他 API Key 创建，请切换回原 Key 后恢复" } } : item));
-                    return;
-                }
-                const controller = startGenerationRequest(node.id, node.id, node.id);
-                const task: VideoGenerationTask = {
+            void resumeCanvasVideoTasks<VideoGenerationTask, VideoGenerationResult, UploadedFile>(restoredNodes, {
+                getAuthIdentity: () => imageTaskAuthIdentity(effectiveConfig.apiKey),
+                start: (node) => startGenerationRequest(node.id, node.id, node.id),
+                finish: (node, controller) => finishGenerationRequest(node.id, controller),
+                resume: (node, signal, onTask) => resumeVideoGenerationTask(buildGenerationConfig(effectiveConfig, node, "video"), {
                     id: node.metadata!.videoTaskId!,
                     modelConfigId: node.metadata!.videoTaskModelConfigId || 0,
                     model: node.metadata!.model || effectiveConfig.videoModel,
                     status: node.metadata!.videoTaskStatus as VideoGenerationTask["status"],
-                };
-                void resumeVideoGenerationTask(buildGenerationConfig(effectiveConfig, node, "video"), task, { signal: controller.signal, onTask: (next) => trackCanvasVideoTask(node.id, next) })
-                    .then(storeGeneratedVideo)
-                    .then((video) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, ...videoMetadata(video), videoTaskStatus: "completed", errorDetails: undefined } } : item)))
-                    .catch((error) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: error instanceof Error ? error.message : "视频任务恢复失败" } } : item)))
-                    .finally(() => finishGenerationRequest(node.id, controller));
+                }, { signal, onTask }),
+                onTask: (node, task) => trackCanvasVideoTask(node.id, task),
+                store: storeGeneratedVideo,
+                onCompleted: (node, video) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, ...videoMetadata(video), videoTaskStatus: "completed", errorDetails: undefined } } : item)),
+                onIdentityMismatch: (node) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: "视频任务使用其他 API Key 创建，请切换回原 Key 后恢复" } } : item)),
+                onError: (node, error) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: error instanceof Error ? error.message : "视频任务恢复失败" } } : item)),
             });
             if (historyCommitTimerRef.current) {
                 clearTimeout(historyCommitTimerRef.current);
