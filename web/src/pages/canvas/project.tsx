@@ -2875,7 +2875,7 @@ function InfiniteCanvasPage() {
     );
 }
 
-function CanvasTopBar({
+export function CanvasTopBar({
     title,
     titleDraft,
     isTitleEditing,
@@ -2932,8 +2932,8 @@ function CanvasTopBar({
 
     return (
         <>
-            <div className="pointer-events-none absolute left-0 right-0 top-0 z-50 flex h-16 items-center justify-between px-4">
-                <div className="pointer-events-auto flex min-w-0 items-center gap-3">
+            <div className="canvas-top-bar pointer-events-none absolute left-0 right-0 top-0 z-50 flex min-h-16 flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 py-2 md:h-16 md:flex-nowrap md:px-4 md:py-0">
+                <div className="canvas-top-bar-primary pointer-events-auto flex w-full min-w-0 items-center gap-2 md:w-auto md:flex-1 md:gap-3">
                     <Dropdown
                         trigger={["click"]}
                         menu={{
@@ -2952,12 +2952,12 @@ function CanvasTopBar({
                             ],
                         }}
                     >
-                        <button type="button" className="grid size-9 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label="打开画布菜单">
+                        <button type="button" className="grid size-9 shrink-0 place-items-center rounded-full transition hover:bg-black/5 dark:hover:bg-white/10" style={{ color: theme.node.text }} aria-label="打开画布菜单">
                             <Menu className="size-5" />
                         </button>
                     </Dropdown>
 
-                    <div ref={titleRef} className="flex min-w-0 items-center gap-2">
+                    <div ref={titleRef} className="canvas-top-bar-title flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                         {isTitleEditing ? (
                             <input
                                 autoFocus
@@ -2968,13 +2968,13 @@ function CanvasTopBar({
                                     if (event.key === "Enter") onFinishTitleEditing();
                                     if (event.key === "Escape") onCancelTitleEditing();
                                 }}
-                                className="max-w-[280px] bg-transparent p-0 text-left text-lg font-semibold tracking-normal outline-none"
+                                className="w-full min-w-0 max-w-[280px] bg-transparent p-0 text-left text-lg font-semibold tracking-normal outline-none"
                                 style={{ color: theme.node.text }}
                             />
                         ) : (
                             <button
                                 type="button"
-                                className="max-w-[280px] truncate border-b border-dashed border-transparent text-left text-lg font-semibold tracking-normal transition hover:border-current"
+                                className="block w-full min-w-0 max-w-[280px] truncate border-b border-dashed border-transparent text-left text-lg font-semibold tracking-normal transition hover:border-current"
                                 onDoubleClick={onStartTitleEditing}
                                 title="双击修改画布名称"
                             >
@@ -2985,7 +2985,7 @@ function CanvasTopBar({
                     <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} />
                 </div>
 
-                <div className="pointer-events-auto flex items-center gap-1.5">
+                <div className="canvas-top-bar-actions pointer-events-auto ml-auto flex shrink-0 items-center gap-1.5">
                     <UserStatusActions
                         variant="canvas"
                         onOpenShortcuts={() => setShortcutsOpen(true)}
@@ -3040,7 +3040,7 @@ function CompactAgentStatus({ status, onClick }: { status: { connected: boolean;
     return (
         <button
             type="button"
-            className="flex h-8 items-center gap-1.5 text-xs transition hover:opacity-75"
+            className="flex h-8 shrink-0 items-center gap-1.5 text-xs transition hover:opacity-75"
             style={{ color: status.connected ? "#16a34a" : status.enabled ? "#d97706" : theme.node.muted }}
             onClick={onClick}
             title="打开本地 Codex 面板"

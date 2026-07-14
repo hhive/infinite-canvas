@@ -16,12 +16,14 @@ type ModelPickerProps = {
     onMissingConfig?: () => void;
 };
 
+const EMPTY_MEDIA_MODELS: ReadonlyArray<MediaModelLabelData> = Object.freeze([]);
+
 export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
     const current = value || "";
-    const mediaModels = useConfigStore((state) => (capability === "image" || capability === "video" ? state.mediaModels[capability] : []));
+    const mediaModels = useConfigStore((state) => (capability === "image" || capability === "video" ? state.mediaModels[capability] : EMPTY_MEDIA_MODELS));
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -96,7 +98,7 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
 
 type MediaModelLabelData = { mediaType: string; model: string; displayName: string; providerName: string; priceQuota: number };
 
-function ModelLabel({ config, model, mediaModels }: { config: AiConfig; model: string; mediaModels: MediaModelLabelData[] }) {
+function ModelLabel({ config, model, mediaModels }: { config: AiConfig; model: string; mediaModels: ReadonlyArray<MediaModelLabelData> }) {
     return (
         <span className="flex w-full min-w-0 items-center gap-2">
             <ModelIcon model={model} />
@@ -105,7 +107,7 @@ function ModelLabel({ config, model, mediaModels }: { config: AiConfig; model: s
     );
 }
 
-function ModelText({ config, model, mediaModels, className }: { config: AiConfig; model: string; mediaModels: MediaModelLabelData[]; className?: string }) {
+function ModelText({ config, model, mediaModels, className }: { config: AiConfig; model: string; mediaModels: ReadonlyArray<MediaModelLabelData>; className?: string }) {
     const item = findMediaModel(mediaModels, model);
     const identity = item ? mediaModelIdentity(item) : modelOptionLabel(config, model);
     return (
@@ -116,14 +118,14 @@ function ModelText({ config, model, mediaModels, className }: { config: AiConfig
     );
 }
 
-export function mediaModelLabel(models: MediaModelLabelData[], option: string) {
+export function mediaModelLabel(models: ReadonlyArray<MediaModelLabelData>, option: string) {
     const item = findMediaModel(models, option);
     if (!item) return "";
     const identity = mediaModelIdentity(item);
     return item.mediaType === "video" ? `${identity} · ${formatPriceQuota(item.priceQuota)} / 次` : identity;
 }
 
-function findMediaModel(models: MediaModelLabelData[], option: string) {
+function findMediaModel(models: ReadonlyArray<MediaModelLabelData>, option: string) {
     const name = modelOptionName(option);
     return models.find((model) => model.model === name);
 }

@@ -242,18 +242,19 @@ export const useConfigStore = create<ConfigStore>()(
                 })),
             applyMediaModels: (capability, mediaModels) =>
                 set((state) => {
+                    const normalizedMediaModels = uniqueMediaModels(mediaModels);
                     const firstChannel = state.config.channels[0] || createModelChannel({ id: "default", name: "默认渠道" });
-                    const options = mediaModels.map((item) => encodeChannelModel(firstChannel.id, item.model));
+                    const options = normalizedMediaModels.map((item) => encodeChannelModel(firstChannel.id, item.model));
                     const modelKey = capability === "image" ? "imageModel" : "videoModel";
                     const modelsKey = capability === "image" ? "imageModels" : "videoModels";
                     const selected = options.includes(state.config[modelKey]) ? state.config[modelKey] : options[0] || "";
                     const channels = [
-                        { ...firstChannel, models: uniqueRawModels([...firstChannel.models, ...mediaModels.map((item) => item.model)]) },
+                        { ...firstChannel, models: uniqueRawModels([...firstChannel.models, ...normalizedMediaModels.map((item) => item.model)]) },
                         ...state.config.channels.slice(1),
                     ];
                     return {
                         config: { ...state.config, channels, models: modelOptionsFromChannels(channels), [modelsKey]: options, [modelKey]: selected },
-                        mediaModels: { ...state.mediaModels, [capability]: mediaModels },
+                        mediaModels: { ...state.mediaModels, [capability]: normalizedMediaModels },
                         mediaModelStatus: { ...state.mediaModelStatus, [capability]: "ready" },
                         mediaModelErrors: { ...state.mediaModelErrors, [capability]: "" },
                         mediaModelsRefreshedAt: { ...state.mediaModelsRefreshedAt, [capability]: new Date().toISOString() },
@@ -422,6 +423,18 @@ function normalizeApiFormat(apiFormat: unknown): ApiCallFormat {
 
 function uniqueRawModels(models: string[]) {
     return Array.from(new Set((models || []).map((model) => modelOptionName(model).trim()).filter(Boolean)));
+}
+
+function uniqueMediaModels(models: MediaModel[]) {
+    const seen = new Set<string>();
+    const unique: MediaModel[] = [];
+    for (const item of models) {
+        const model = item.model.trim();
+        if (!model || seen.has(model)) continue;
+        seen.add(model);
+        unique.push(model === item.model ? item : { ...item, model });
+    }
+    return unique;
 }
 
 function uniqueModelOptions(models: string[]) {

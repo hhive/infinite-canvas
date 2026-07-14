@@ -29,6 +29,33 @@ describe("fetchMediaModels", () => {
         await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "openai_videos_v2", priceQuota: 12 }]);
     });
 
+    it("keeps the first image record for duplicate normalized model names", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({
+            data: [
+                { id: 11, media_type: "image", model: " gpt-image-2 ", display_name: "Primary", provider_name: "provider-a", api_mode: "images", price_quota: 8 },
+                { id: 12, media_type: "image", model: "gpt-image-2", display_name: "Fallback", provider_name: "provider-b", api_mode: "responses", price_quota: 3 },
+            ],
+        });
+
+        await expect(fetchMediaModels("image")).resolves.toEqual([
+            { id: 11, mediaType: "image", model: "gpt-image-2", displayName: "Primary", providerName: "provider-a", apiMode: "images", priceQuota: 8 },
+        ]);
+    });
+
+    it("keeps case-distinct model names separate", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({
+            data: [
+                { id: 13, media_type: "image", model: "GPT-Image-2" },
+                { id: 14, media_type: "image", model: "gpt-image-2" },
+            ],
+        });
+
+        await expect(fetchMediaModels("image")).resolves.toMatchObject([
+            { id: 13, model: "GPT-Image-2" },
+            { id: 14, model: "gpt-image-2" },
+        ]);
+    });
+
     it.each([
         ["negative", -1],
         ["NaN", Number.NaN],

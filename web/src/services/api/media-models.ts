@@ -24,7 +24,8 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
         withCredentials: true,
     });
     if (!Array.isArray(response.data)) throw new Error(`${capability === "image" ? "图片" : "视频"}模型接口返回格式无效`);
-    const seen = new Set<number>();
+    const seenIds = new Set<number>();
+    const seenModels = new Set<string>();
     const models: MediaModel[] = [];
     for (const raw of response.data) {
         if (!raw || typeof raw !== "object") continue;
@@ -32,9 +33,10 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
         const id = Number(item.id);
         const model = typeof item.model === "string" ? item.model.trim() : "";
         const mediaType = typeof item.media_type === "string" ? item.media_type : capability;
-        if (!Number.isSafeInteger(id) || id <= 0 || !model || mediaType !== capability || seen.has(id)) continue;
+        if (!Number.isSafeInteger(id) || id <= 0 || !model || mediaType !== capability || seenIds.has(id) || seenModels.has(model)) continue;
         const rawPriceQuota = Number(item.price_quota);
-        seen.add(id);
+        seenIds.add(id);
+        seenModels.add(model);
         models.push({
             id,
             mediaType: capability,
