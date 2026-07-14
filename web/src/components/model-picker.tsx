@@ -54,7 +54,13 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 title={current ? mediaModelLabel(mediaModels, current) || modelOptionLabel(config, current) : placeholder}
             >
                 <ModelIcon model={current} />
-                {current ? <ModelText config={config} model={current} mediaModels={mediaModels} className="canvas-model-picker-text flex-1" /> : <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{placeholder}</span>}
+                {current ? (
+                    <span className="canvas-model-picker-text min-w-0 flex-1">
+                        <ModelText config={config} model={current} mediaModels={mediaModels} />
+                    </span>
+                ) : (
+                    <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{placeholder}</span>
+                )}
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
@@ -103,7 +109,7 @@ function ModelText({ config, model, mediaModels, className }: { config: AiConfig
     const item = findMediaModel(mediaModels, model);
     const identity = item ? mediaModelIdentity(item) : modelOptionLabel(config, model);
     return (
-        <span className={cn("flex min-w-0 items-center gap-1.5 text-left", className)}>
+        <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-left", className)}>
             <span className="min-w-0 flex-1 truncate">{identity}</span>
             {item?.mediaType === "video" ? <span className="shrink-0">{formatPriceQuota(item.priceQuota)} / 次</span> : null}
         </span>
@@ -127,7 +133,7 @@ function mediaModelIdentity(item: MediaModelLabelData) {
 }
 
 function formatPriceQuota(priceQuota: number) {
-    return new Intl.NumberFormat("zh-CN", { useGrouping: false, maximumFractionDigits: 6 }).format(priceQuota);
+    return new Intl.NumberFormat("zh-CN", { useGrouping: false, maximumFractionDigits: 6 }).format(priceQuota === 0 ? 0 : priceQuota);
 }
 
 function ModelIcon({ model }: { model: string }) {

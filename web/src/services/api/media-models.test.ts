@@ -29,9 +29,23 @@ describe("fetchMediaModels", () => {
         await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "openai_videos_v2", priceQuota: 12 }]);
     });
 
-    it("normalizes an invalid video price to zero", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 9, model: "video-invalid-price", price_quota: -1 }] });
+    it.each([
+        ["negative", -1],
+        ["NaN", Number.NaN],
+        ["positive infinity", Number.POSITIVE_INFINITY],
+        ["undefined", undefined],
+        ["null", null],
+        ["non-numeric string", "not-a-number"],
+    ])("normalizes %s video price to zero", async (_label, priceQuota) => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 9, model: "video-invalid-price", price_quota: priceQuota }] });
         await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 9, priceQuota: 0 }]);
+    });
+
+    it("normalizes negative zero to ordinary zero", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 10, model: "video-negative-zero", price_quota: -0 }] });
+        const [model] = await fetchMediaModels("video");
+        expect(model.priceQuota).toBe(0);
+        expect(Object.is(model.priceQuota, -0)).toBe(false);
     });
 
     it("rejects a non-array response", async () => {

@@ -42,7 +42,7 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
             displayName: typeof item.display_name === "string" && item.display_name.trim() ? item.display_name.trim() : model,
             providerName: typeof item.provider_name === "string" ? item.provider_name.trim() : "",
             apiMode: typeof item.api_mode === "string" ? item.api_mode.trim() : "",
-            priceQuota: Number.isFinite(rawPriceQuota) && rawPriceQuota >= 0 ? rawPriceQuota : 0,
+            priceQuota: Number.isFinite(rawPriceQuota) && rawPriceQuota > 0 ? rawPriceQuota : 0,
         });
     }
     return models;
