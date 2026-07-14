@@ -70,6 +70,28 @@ describe("ModelPicker", () => {
         expect(placeholder?.textContent).toBe("选择视频模型");
         expect(placeholder?.classList.contains("truncate")).toBe(true);
     });
+
+    it("uses one bounded price label for extreme finite video prices", () => {
+        const model = { id: 2, mediaType: "video" as const, model: "video-extreme", displayName: "Extreme Video", providerName: "OpenAI", apiMode: "videos", priceQuota: Number.MAX_VALUE };
+        const config = {
+            ...defaultConfig,
+            channels: [{ ...defaultConfig.channels[0], models: [model.model] }],
+            models: [`default::${model.model}`],
+            videoModels: [`default::${model.model}`],
+        };
+        useConfigStore.setState({ mediaModels: { image: [], video: [model] } });
+
+        renderPicker({ config, value: `default::${model.model}`, capability: "video", onChange: vi.fn() });
+
+        const trigger = container.querySelector("button");
+        const visiblePrice = trigger?.querySelector(".canvas-model-picker-text")?.firstElementChild?.children[1]?.textContent || "";
+        const optionTextValue = container.querySelector(`[data-value="default::${model.model}"]`)?.getAttribute("data-text-value") || "";
+
+        expect(visiblePrice.length).toBeLessThan(32);
+        expect(visiblePrice).toMatch(/E\+?308 \/ 次$/i);
+        expect(trigger?.title.endsWith(visiblePrice)).toBe(true);
+        expect(optionTextValue.endsWith(visiblePrice)).toBe(true);
+    });
 });
 
 describe("mediaModelLabel", () => {
@@ -83,5 +105,11 @@ describe("mediaModelLabel", () => {
 
     it("never displays negative zero", () => {
         expect(mediaModelLabel([{ mediaType: "video", model: "video-1", displayName: "Video", providerName: "OpenAI", priceQuota: -0 }], "video-1")).not.toContain("-0 / 次");
+    });
+
+    it("bounds extreme finite prices while preserving their magnitude", () => {
+        const label = mediaModelLabel([{ mediaType: "video", model: "video-1", displayName: "Video", providerName: "OpenAI", priceQuota: Number.MAX_VALUE }], "video-1");
+        expect(label.length).toBeLessThan(80);
+        expect(label).toMatch(/E\+?308 \/ 次$/i);
     });
 });

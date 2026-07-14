@@ -133,7 +133,10 @@ function mediaModelIdentity(item: MediaModelLabelData) {
 }
 
 function formatPriceQuota(priceQuota: number) {
-    return new Intl.NumberFormat("zh-CN", { useGrouping: false, maximumFractionDigits: 6 }).format(priceQuota === 0 ? 0 : priceQuota);
+    const value = priceQuota === 0 ? 0 : priceQuota;
+    const formatted = new Intl.NumberFormat("zh-CN", { useGrouping: false, maximumFractionDigits: 6 }).format(value);
+    if (formatted.length <= 24) return formatted;
+    return new Intl.NumberFormat("zh-CN", { notation: "scientific", useGrouping: false, maximumFractionDigits: 6 }).format(value);
 }
 
 function ModelIcon({ model }: { model: string }) {
