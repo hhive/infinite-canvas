@@ -19,14 +19,19 @@ describe("fetchMediaModels", () => {
         });
 
         await expect(fetchMediaModels("image", "sk-test")).resolves.toEqual([
-            { id: 2, mediaType: "image", model: "gpt-image-2", displayName: "GPT Image", providerName: "openai", apiMode: "images" },
+            { id: 2, mediaType: "image", model: "gpt-image-2", displayName: "GPT Image", providerName: "openai", apiMode: "images", priceQuota: 0 },
         ]);
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "image" }, headers: { Authorization: "Bearer sk-test" }, withCredentials: true }));
     });
 
     it("accepts video responses without a redundant media_type field", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "openai_videos_v2" }] });
-        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "openai_videos_v2" }]);
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "openai_videos_v2", price_quota: 12 }] });
+        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "openai_videos_v2", priceQuota: 12 }]);
+    });
+
+    it("normalizes an invalid video price to zero", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 9, model: "video-invalid-price", price_quota: -1 }] });
+        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 9, priceQuota: 0 }]);
     });
 
     it("rejects a non-array response", async () => {

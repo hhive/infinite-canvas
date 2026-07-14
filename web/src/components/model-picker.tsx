@@ -54,7 +54,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 title={current ? mediaModelLabel(mediaModels, current) || modelOptionLabel(config, current) : placeholder}
             >
                 <ModelIcon model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? mediaModelLabel(mediaModels, current) || modelOptionLabel(config, current) : placeholder}</span>
+                {current ? <ModelText config={config} model={current} mediaModels={mediaModels} className="canvas-model-picker-text flex-1" /> : <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{placeholder}</span>}
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
@@ -68,8 +68,8 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             >
                 {options.length ? (
                     options.map((model) => (
-                        <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)}>
-                            <ModelLabel config={config} model={model} label={mediaModelLabel(mediaModels, model)} />
+                        <SelectItem key={model} value={model} textValue={mediaModelLabel(mediaModels, model) || modelOptionLabel(config, model)}>
+                            <ModelLabel config={config} model={model} mediaModels={mediaModels} />
                         </SelectItem>
                     ))
                 ) : (
@@ -88,20 +88,46 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
     return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
 }
 
-function ModelLabel({ config, model, label }: { config: AiConfig; model: string; label?: string }) {
+type MediaModelLabelData = { mediaType: string; model: string; displayName: string; providerName: string; priceQuota: number };
+
+function ModelLabel({ config, model, mediaModels }: { config: AiConfig; model: string; mediaModels: MediaModelLabelData[] }) {
     return (
-        <span className="flex min-w-0 items-center gap-2">
+        <span className="flex w-full min-w-0 items-center gap-2">
             <ModelIcon model={model} />
-            <span className="truncate">{label || modelOptionLabel(config, model)}</span>
+            <ModelText config={config} model={model} mediaModels={mediaModels} className="flex-1" />
         </span>
     );
 }
 
-function mediaModelLabel(models: Array<{ model: string; displayName: string; providerName: string }>, option: string) {
-    const name = modelOptionName(option);
-    const item = models.find((model) => model.model === name);
+function ModelText({ config, model, mediaModels, className }: { config: AiConfig; model: string; mediaModels: MediaModelLabelData[]; className?: string }) {
+    const item = findMediaModel(mediaModels, model);
+    const identity = item ? mediaModelIdentity(item) : modelOptionLabel(config, model);
+    return (
+        <span className={cn("flex min-w-0 items-center gap-1.5 text-left", className)}>
+            <span className="min-w-0 flex-1 truncate">{identity}</span>
+            {item?.mediaType === "video" ? <span className="shrink-0">{formatPriceQuota(item.priceQuota)} / 次</span> : null}
+        </span>
+    );
+}
+
+export function mediaModelLabel(models: MediaModelLabelData[], option: string) {
+    const item = findMediaModel(models, option);
     if (!item) return "";
+    const identity = mediaModelIdentity(item);
+    return item.mediaType === "video" ? `${identity} · ${formatPriceQuota(item.priceQuota)} / 次` : identity;
+}
+
+function findMediaModel(models: MediaModelLabelData[], option: string) {
+    const name = modelOptionName(option);
+    return models.find((model) => model.model === name);
+}
+
+function mediaModelIdentity(item: MediaModelLabelData) {
     return item.providerName ? `${item.displayName} · ${item.providerName}` : item.displayName;
+}
+
+function formatPriceQuota(priceQuota: number) {
+    return new Intl.NumberFormat("zh-CN", { useGrouping: false, maximumFractionDigits: 6 }).format(priceQuota);
 }
 
 function ModelIcon({ model }: { model: string }) {
