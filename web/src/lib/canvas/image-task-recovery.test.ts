@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyImageTaskTerminalStatus, canCancelImageTaskStatus, cancelImageTaskBatch, cancelImageTaskRequest, isRecoverableImageTaskStatus, resetInterruptedImageGeneration, resumeCanvasImageTasks } from "@/lib/canvas/image-task-recovery";
+import { applyImageTaskTerminalStatus, applyLocalTaskDetach, canCancelImageTaskStatus, isRecoverableImageTaskStatus, resetInterruptedImageGeneration, resumeCanvasImageTasks } from "@/lib/canvas/image-task-recovery";
 import { vi } from "vitest";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
@@ -36,29 +36,21 @@ describe("canvas image task recovery", () => {
         expect(resetInterruptedImageGeneration([{ ...node(undefined), metadata }])[0].metadata).toEqual(metadata);
     });
 
-    it("cancels one production request without touching its batch sibling", () => {
-        const first = new AbortController();
-        const second = new AbortController();
-        const requests = new Map([
-            ["child-1", { controller: first, taskId: "task-1" }],
-            ["child-2", { controller: second, taskId: "task-2" }],
-        ]);
-        expect(cancelImageTaskRequest(requests, "child-1")).toBe("task-1");
-        expect(first.signal.aborted).toBe(true);
-        expect(second.signal.aborted).toBe(false);
-        expect(requests.has("child-1")).toBe(false);
-        expect(requests.has("child-2")).toBe(true);
-    });
-
-    it("stops a batch by canceling every child through the production coordinator", async () => {
-        const requests = new Map([
-            ["child-1", { runningNodeId: "root-1" }],
-            ["child-2", { runningNodeId: "root-1" }],
-            ["other", { runningNodeId: "root-2" }],
-        ]);
-        const canceled: string[] = [];
-        await expect(cancelImageTaskBatch(requests, "root-1", async (id) => { canceled.push(id); })).resolves.toEqual(["child-1", "child-2"]);
-        expect(canceled).toEqual(["child-1", "child-2"]);
+    it("preserves the server task identity and running status after local detachment", () => {
+        const metadata = applyLocalTaskDetach({
+            status: "loading",
+            imageTaskId: "task-1",
+            imageTaskStatus: "running",
+            imageTaskAuthIdentity: "cookie-session",
+        });
+        expect(metadata).toMatchObject({
+            status: "error",
+            imageTaskId: "task-1",
+            imageTaskStatus: "running",
+            imageTaskAuthIdentity: "cookie-session",
+            errorDetails: expect.stringContaining("任务仍在后台运行"),
+        });
+        expect(isRecoverableImageTaskStatus(metadata.imageTaskStatus, metadata.imageTaskId)).toBe(true);
     });
 
     it("restores generation, reference/mask edit, and batch children with original task IDs", async () => {
@@ -85,5 +77,26 @@ describe("canvas image task recovery", () => {
         expect(resume.mock.calls.map(([taskId]) => taskId)).toEqual(["task-text", "task-edit", "task-batch"]);
         expect(completed).toHaveBeenCalledTimes(3);
         expect(finished).toHaveBeenCalledTimes(3);
+    });
+
+    it("passes the active controller to task callbacks", async () => {
+        const controller = new AbortController();
+        const onTask = vi.fn();
+
+        await resumeCanvasImageTasks([{ ...node("running"), metadata: { ...node("running").metadata, imageTaskAuthIdentity: "cookie-session" } }], {
+            getAuthIdentity: async () => "cookie-session",
+            start: () => controller,
+            finish: vi.fn(),
+            resume: async (_taskId, _signal, callback) => {
+                await callback({ status: "running" });
+                return [{ id: "image-1" }];
+            },
+            onTask,
+            onCompleted: vi.fn(),
+            onIdentityMismatch: vi.fn(),
+            onError: vi.fn(),
+        });
+
+        expect(onTask).toHaveBeenCalledWith(expect.objectContaining({ id: "node-1" }), { status: "running" }, controller);
     });
 });

@@ -1,4 +1,5 @@
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
+import { LOCAL_TASK_DETACH_MESSAGE } from "@/lib/task-detach";
 
 export function isRecoverableImageTaskStatus(status?: CanvasNodeMetadata["imageTaskStatus"], taskId?: string) {
     return Boolean(taskId) && (status === "queued" || status === "running" || status === "completed");
@@ -15,6 +16,10 @@ export function applyImageTaskTerminalStatus(metadata: CanvasNodeMetadata, statu
     return { ...metadata, imageTaskStatus: status };
 }
 
+export function applyLocalTaskDetach(metadata: CanvasNodeMetadata): CanvasNodeMetadata {
+    return { ...metadata, status: "error", errorDetails: LOCAL_TASK_DETACH_MESSAGE };
+}
+
 export function resetInterruptedImageGeneration(nodes: CanvasNodeData[]) {
     return nodes.map((node) =>
         node.metadata?.status === "loading" && !isRecoverableImageTaskStatus(node.metadata.imageTaskStatus, node.metadata.imageTaskId)
@@ -23,26 +28,12 @@ export function resetInterruptedImageGeneration(nodes: CanvasNodeData[]) {
     );
 }
 
-export function cancelImageTaskRequest<T extends { controller: AbortController; taskId?: string }>(requests: Map<string, T>, targetNodeId: string) {
-    const request = requests.get(targetNodeId);
-    if (!request) return undefined;
-    request.controller.abort();
-    requests.delete(targetNodeId);
-    return request.taskId;
-}
-
-export async function cancelImageTaskBatch<T extends { runningNodeId: string }>(requests: Map<string, T>, runningNodeId: string, cancelTarget: (targetNodeId: string) => Promise<void>) {
-    const targetIds = [...requests.entries()].filter(([, request]) => request.runningNodeId === runningNodeId).map(([targetNodeId]) => targetNodeId);
-    await Promise.all(targetIds.map(cancelTarget));
-    return targetIds;
-}
-
 export async function resumeCanvasImageTasks<TTask, TResult>(nodes: CanvasNodeData[], dependencies: {
     getAuthIdentity: () => Promise<string>;
     start: (node: CanvasNodeData) => AbortController;
     finish: (node: CanvasNodeData, controller: AbortController) => void;
     resume: (taskId: string, signal: AbortSignal, onTask: (task: TTask) => void | Promise<void>) => Promise<TResult[]>;
-    onTask: (node: CanvasNodeData, task: TTask) => void | Promise<void>;
+    onTask: (node: CanvasNodeData, task: TTask, controller: AbortController) => void | Promise<void>;
     onCompleted: (node: CanvasNodeData, item: TResult) => void | Promise<void>;
     onIdentityMismatch: (node: CanvasNodeData) => void;
     onError: (node: CanvasNodeData, error: unknown) => void;
@@ -57,7 +48,7 @@ export async function resumeCanvasImageTasks<TTask, TResult>(nodes: CanvasNodeDa
                 dependencies.onIdentityMismatch(node);
                 return;
             }
-            const items = await dependencies.resume(taskId, controller.signal, (task) => dependencies.onTask(node, task));
+            const items = await dependencies.resume(taskId, controller.signal, (task) => dependencies.onTask(node, task, controller));
             if (!items[0]) throw new Error("接口没有返回图片");
             await dependencies.onCompleted(node, items[0]);
         } catch (error) {

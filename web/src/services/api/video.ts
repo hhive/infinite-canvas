@@ -125,16 +125,6 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     }
 }
 
-export async function cancelVideoGenerationTask(config: AiConfig, task: VideoGenerationTask): Promise<VideoGenerationTask> {
-    const requestConfig = resolveModelRequestConfig(config, task.model);
-    try {
-        const response = await axios.delete<MediaVideoTask>(`${VIDEO_PATH}/${encodeURIComponent(task.id)}`, { headers: sameOriginHeaders(requestConfig.apiKey), withCredentials: true });
-        return normalizeTask(response.data);
-    } catch (error) {
-        throw new Error(readAxiosError(error, "视频任务取消失败"));
-    }
-}
-
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
     if (result.blob) return uploadMediaFile(result.blob, "video");
     if (result.url) {

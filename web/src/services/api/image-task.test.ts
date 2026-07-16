@@ -1,38 +1,26 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { cancelImageTask, fetchChannelModels, probeImageSession, requestEdit, requestGeneration, waitForImageTask, type ImageTask } from "@/services/api/image";
+import * as imageApi from "@/services/api/image";
 import { defaultConfig } from "@/stores/use-config-store";
 
 vi.mock("axios", () => ({
     default: { get: vi.fn(), post: vi.fn(), isAxiosError: vi.fn(), isCancel: vi.fn(() => false) },
 }));
 
-const runningTask: ImageTask = { task_id: "task-1", status: "running", model_config_id: 1, model: "gpt-image-2", poll_after_ms: 500 };
+const runningTask: imageApi.ImageTask = { task_id: "task-1", status: "running", model_config_id: 1, model: "gpt-image-2", poll_after_ms: 500 };
 
 afterEach(() => vi.clearAllMocks());
 
 describe("image task cancellation boundaries", () => {
-    it("explicit cancellation calls the server cancel endpoint", async () => {
-        vi.mocked(axios.post).mockResolvedValue({ data: { ...runningTask, status: "canceled" } });
-        await cancelImageTask("task-1", "sk-test");
-        expect(axios.post).toHaveBeenCalledWith("/v1/images/tasks/task-1/cancel", undefined, expect.objectContaining({ headers: { Authorization: "Bearer sk-test" } }));
-    });
-
-    it("preserves a completed server result when cancellation loses the race", async () => {
-        vi.mocked(axios.post).mockResolvedValue({ data: { ...runningTask, status: "completed" } });
-        await expect(cancelImageTask("task-1")).resolves.toMatchObject({ status: "completed" });
-    });
-
-    it("surfaces cancellation failures instead of fabricating canceled", async () => {
-        vi.mocked(axios.post).mockRejectedValue(new Error("network down"));
-        await expect(cancelImageTask("task-1")).rejects.toThrow("network down");
+    it("does not expose server-side cancellation", () => {
+        expect(imageApi).not.toHaveProperty("cancelImageTask");
     });
 
     it("detaching local polling never calls the cancel endpoint", async () => {
         vi.useFakeTimers();
         const controller = new AbortController();
-        const pending = waitForImageTask(runningTask, "", { signal: controller.signal });
+        const pending = imageApi.waitForImageTask(runningTask, "", { signal: controller.signal });
         await Promise.resolve();
         controller.abort();
         await expect(pending).rejects.toMatchObject({ name: "AbortError" });
@@ -45,13 +33,13 @@ describe("image task cancellation boundaries", () => {
 describe("image session readiness", () => {
     it("uses a bearer header when a manual key exists", async () => {
         vi.mocked(axios.get).mockResolvedValue({ data: {} });
-        await expect(probeImageSession("sk-test")).resolves.toBe(true);
+        await expect(imageApi.probeImageSession("sk-test")).resolves.toBe(true);
         expect(axios.get).toHaveBeenCalledWith("/api/me", { headers: { Authorization: "Bearer sk-test" }, withCredentials: true });
     });
 
     it("uses the cookie session when no key exists", async () => {
         vi.mocked(axios.get).mockResolvedValue({ data: {} });
-        await expect(probeImageSession()).resolves.toBe(true);
+        await expect(imageApi.probeImageSession()).resolves.toBe(true);
         expect(axios.get).toHaveBeenCalledWith("/api/me", { headers: undefined, withCredentials: true });
     });
 });
@@ -59,7 +47,7 @@ describe("image session readiness", () => {
 describe("image edit task payload", () => {
     it("submits references and a mask through one async generation task", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "gpt-image-2" }] });
-        await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
+        await imageApi.fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
                 task_id: "task-edit",
@@ -83,7 +71,7 @@ describe("image edit task payload", () => {
         const reference = { id: "ref-1", name: "reference.png", type: "image/png", dataUrl: "data:image/png;base64,cmVm" };
         const mask = { id: "mask-1", name: "mask.png", type: "image/png", dataUrl: "data:image/png;base64,bWFzaw==" };
 
-        await expect(requestEdit(config, "edit", [reference], mask)).resolves.toHaveLength(1);
+        await expect(imageApi.requestEdit(config, "edit", [reference], mask)).resolves.toHaveLength(1);
 
         expect(axios.post).toHaveBeenCalledTimes(1);
         expect(axios.post).toHaveBeenCalledWith(
@@ -118,7 +106,7 @@ describe("image model config mapping", () => {
             imageModel: "default::gpt-image-refresh",
         };
 
-        await expect(requestGeneration(config, "draw")).resolves.toHaveLength(1);
+        await expect(imageApi.requestGeneration(config, "draw")).resolves.toHaveLength(1);
         expect(axios.get).toHaveBeenCalledTimes(1);
         expect(axios.post).toHaveBeenCalledWith("/v1/images/generations/async", expect.objectContaining({ model: "gpt-image-refresh" }), expect.anything());
     });
@@ -132,7 +120,7 @@ describe("image model config mapping", () => {
             imageModel: "default::gpt-image-missing",
         };
 
-        await expect(requestGeneration(config, "draw")).rejects.toThrow("当前模型 gpt-image-missing 没有可用的图片站配置");
+        await expect(imageApi.requestGeneration(config, "draw")).rejects.toThrow("当前模型 gpt-image-missing 没有可用的图片站配置");
         expect(axios.post).not.toHaveBeenCalled();
     });
 });

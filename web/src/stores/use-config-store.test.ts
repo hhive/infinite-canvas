@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 
 function imageModel(id: number, model: string, displayName = model): MediaModel {
-    return { id, mediaType: "image", model, displayName, providerName: "provider", apiMode: "images", priceQuota: id };
+    return { id, mediaType: "image", model, displayName, providerName: "provider", priceQuota: id };
 }
 
 describe("config authentication cleanup", () => {

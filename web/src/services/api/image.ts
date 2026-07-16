@@ -114,11 +114,6 @@ export async function getImageTask(taskId: string, apiKey = "", signal?: AbortSi
     return response.data;
 }
 
-export async function cancelImageTask(taskId: string, apiKey = "") {
-    const response = await axios.post<ImageTask>(`${IMAGE_TASK_PATH}/${encodeURIComponent(taskId)}/cancel`, undefined, { headers: sameOriginHeaders(apiKey), withCredentials: true });
-    return response.data;
-}
-
 export async function probeImageSession(apiKey = "") {
     try {
         await axios.get("/api/me", { headers: sameOriginHeaders(apiKey), withCredentials: true });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { hasStoredVideoContent, isRecoverableVideoTaskStatus, normalizeInterruptedVideoGeneration, resumeCanvasVideoTasks } from "@/lib/canvas/video-task-recovery";
@@ -68,5 +68,27 @@ describe("video task recovery", () => {
         });
         expect(resumed).toBe(1);
         expect(errors.sort()).toEqual(["video-1:download failed", "video-2:identity"]);
+    });
+
+    it("passes the active controller to task callbacks", async () => {
+        const controller = new AbortController();
+        const onTask = vi.fn();
+
+        await resumeCanvasVideoTasks([node("running", "task-1")], {
+            getAuthIdentity: async () => "",
+            start: () => controller,
+            finish: vi.fn(),
+            resume: async (_node, _signal, callback) => {
+                await callback({ status: "running" });
+                return { url: "/content" };
+            },
+            onTask,
+            store: async () => ({ storageKey: "video:stored" }),
+            onCompleted: vi.fn(),
+            onIdentityMismatch: vi.fn(),
+            onError: vi.fn(),
+        });
+
+        expect(onTask).toHaveBeenCalledWith(expect.objectContaining({ id: "video-1" }), { status: "running" }, controller);
     });
 });

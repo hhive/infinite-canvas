@@ -28,7 +28,7 @@ export async function resumeCanvasVideoTasks<TTask, TResult, TStored>(nodes: Can
     start: (node: CanvasNodeData) => AbortController;
     finish: (node: CanvasNodeData, controller: AbortController) => void;
     resume: (node: CanvasNodeData, signal: AbortSignal, onTask: (task: TTask) => void | Promise<void>) => Promise<TResult>;
-    onTask: (node: CanvasNodeData, task: TTask) => void | Promise<void>;
+    onTask: (node: CanvasNodeData, task: TTask, controller: AbortController) => void | Promise<void>;
     store: (result: TResult) => Promise<TStored>;
     onCompleted: (node: CanvasNodeData, stored: TStored) => void | Promise<void>;
     onIdentityMismatch: (node: CanvasNodeData) => void;
@@ -43,7 +43,7 @@ export async function resumeCanvasVideoTasks<TTask, TResult, TStored>(nodes: Can
         }
         const controller = dependencies.start(node);
         try {
-            const result = await dependencies.resume(node, controller.signal, (task) => dependencies.onTask(node, task));
+            const result = await dependencies.resume(node, controller.signal, (task) => dependencies.onTask(node, task, controller));
             const stored = await dependencies.store(result);
             await dependencies.onCompleted(node, stored);
         } catch (error) {

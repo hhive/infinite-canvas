@@ -14,8 +14,9 @@ import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } f
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
-import { cancelImageTask, requestEdit, requestGeneration, resumeImageTask, type ImageTask, type ImageTaskStatus } from "@/services/api/image";
-import { canResumeImageTask, imageTaskAuthIdentity, readImageWorkbenchTasks, removeImageWorkbenchTask, resolveImageTaskCancel, resumeImageWorkbenchRecord, saveImageWorkbenchTask, type ImageWorkbenchTaskRecord } from "@/services/image-task-storage";
+import { requestEdit, requestGeneration, resumeImageTask, type ImageTask, type ImageTaskStatus } from "@/services/api/image";
+import { canResumeImageTask, imageTaskAuthIdentity, readImageWorkbenchTasks, removeImageWorkbenchTask, resumeImageWorkbenchRecord, saveImageWorkbenchTask, type ImageWorkbenchTaskRecord } from "@/services/image-task-storage";
+import { canRetryImageResult, markImageResultLocallyDetached } from "@/pages/image/image-result-state";
 import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -39,6 +40,7 @@ type GenerationResult = {
     error?: string;
     taskId?: string;
     taskStatus?: ImageTaskStatus;
+    locallyDetached?: boolean;
 };
 
 type GenerationLog = {
@@ -400,20 +402,12 @@ export default function ImagePage() {
         }
     };
 
-    const cancelResult = async (index: number) => {
+    const stopWaitingForResult = (index: number) => {
         const result = results[index];
         if (!result?.taskId || (result.taskStatus !== "queued" && result.taskStatus !== "running")) return;
-        const task = await cancelImageTask(result.taskId, effectiveConfig.apiKey);
-        const resolution = resolveImageTaskCancel(task);
-        const record = (await readImageWorkbenchTasks()).find((item) => item.slotId === result.id);
-        if (record) await saveImageWorkbenchTask({ ...record, status: task.status, landingStage: "result_pending" });
-        if (resolution.action === "recover") {
-            setResults((value) => updateResultAt(value, index, { status: "pending", taskStatus: "completed", error: undefined }));
-            return;
-        }
         slotControllersRef.current.get(result.id)?.abort();
         slotControllersRef.current.delete(result.id);
-        setResults((value) => updateResultAt(value, index, { status: "failed", taskStatus: task.status, error: resolution.message }));
+        setResults((value) => value.map((item, itemIndex) => itemIndex === index ? markImageResultLocallyDetached(item) : item));
     };
 
     const retryResult = async (index: number) => {
@@ -573,9 +567,9 @@ export default function ImagePage() {
                                     result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onEdit={addResultToReferences} onDownload={downloadImage} onSaveAsset={saveResultToAssets} />
                                     ) : result.status === "failed" ? (
-                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={() => retryResult(index)} />
+                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} onRetry={canRetryImageResult(result) ? () => retryResult(index) : undefined} />
                                     ) : (
-                                        <PendingImageCard key={result.id} status={result.taskStatus} onCancel={result.taskId ? () => void cancelResult(index) : undefined} />
+                                        <PendingImageCard key={result.id} status={result.taskStatus} onCancel={result.taskId ? () => stopWaitingForResult(index) : undefined} />
                                     ),
                                 )}
                             </div>
@@ -705,7 +699,7 @@ function PendingImageCard({ status, onCancel }: { status?: ImageTaskStatus; onCa
     );
 }
 
-function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => void }) {
+function FailedImageCard({ error, onRetry }: { error: string; onRetry?: () => void }) {
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
@@ -714,11 +708,13 @@ function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => voi
                     {error}
                 </Typography.Paragraph>
             </div>
-            <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
-                <Button size="small" danger onClick={onRetry}>
-                    重试
-                </Button>
-            </div>
+            {onRetry ? (
+                <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
+                    <Button size="small" danger onClick={onRetry}>
+                        重试
+                    </Button>
+                </div>
+            ) : null}
         </div>
     );
 }
