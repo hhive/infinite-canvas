@@ -97,6 +97,7 @@ export type ImageTask = {
 };
 
 const imageModelConfigIDs = new Map<string, number>();
+const imageModelDisplayNames = new Set<string>();
 const IMAGE_ASYNC_PATH = "/v1/images/generations/async";
 const IMAGE_TASK_PATH = "/v1/images/tasks";
 
@@ -731,10 +732,12 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const requestSize = resolveRequestSize(quality, config.size);
     try {
         await modelConfigID(requestConfig.model, requestConfig);
+        const model = modelOptionName(requestConfig.model);
         const task = await submitImageTask(
             requestConfig,
             {
-                model: modelOptionName(requestConfig.model),
+                model,
+                ...(imageModelDisplayNames.has(model) ? { model_display_name: model } : {}),
                 prompt: withSystemPrompt(requestConfig, prompt),
                 n,
                 ...(quality ? { quality } : {}),
@@ -757,12 +760,14 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const requestSize = resolveRequestSize(quality, config.size);
     try {
         await modelConfigID(requestConfig.model, requestConfig);
+        const model = modelOptionName(requestConfig.model);
         const inputImages = await Promise.all(references.map((image) => imageToDataUrl(image)));
         const maskImage = mask ? await imageToDataUrl(mask) : undefined;
         const task = await submitImageTask(
             requestConfig,
             {
-                model: modelOptionName(requestConfig.model),
+                model,
+                ...(imageModelDisplayNames.has(model) ? { model_display_name: model } : {}),
                 prompt: withSystemPrompt(requestConfig, requestPrompt),
                 n,
                 ...(quality ? { quality } : {}),
@@ -808,9 +813,18 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {
-        const response = await axios.get<Array<{ id: number; model: string }>>("/v1/models", { headers: sameOriginHeaders(config.apiKey), withCredentials: true });
+        const response = await axios.get<Array<{ id: number; model: string; display_name?: string }>>("/v1/models", { headers: sameOriginHeaders(config.apiKey), withCredentials: true });
         imageModelConfigIDs.clear();
-        response.data.forEach((item) => imageModelConfigIDs.set(item.model, item.id));
+        imageModelDisplayNames.clear();
+        response.data.forEach((item) => {
+            const model = item.model.trim();
+            const displayName = item.display_name?.trim() || "";
+            if (model) imageModelConfigIDs.set(model, item.id);
+            if (displayName) {
+                if (!imageModelConfigIDs.has(displayName)) imageModelConfigIDs.set(displayName, item.id);
+                imageModelDisplayNames.add(displayName);
+            }
+        });
         return response.data.map((model) => model.model).sort((a, b) => a.localeCompare(b));
     } catch (error) {
         throw new Error(readAxiosError(error, "读取模型失败"));

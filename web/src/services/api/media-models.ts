@@ -25,23 +25,25 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
     });
     if (!Array.isArray(response.data)) throw new Error(`${capability === "image" ? "图片" : "视频"}模型接口返回格式无效`);
     const seenIds = new Set<number>();
-    const seenModels = new Set<string>();
+    const seenSelectionModels = new Set<string>();
     const models: MediaModel[] = [];
     for (const raw of response.data) {
         if (!raw || typeof raw !== "object") continue;
         const item = raw as Record<string, unknown>;
         const id = Number(item.id);
         const model = typeof item.model === "string" ? item.model.trim() : "";
+        const displayName = typeof item.display_name === "string" && item.display_name.trim() ? item.display_name.trim() : model;
+        const selectionModel = capability === "image" ? displayName : model;
         const mediaType = typeof item.media_type === "string" ? item.media_type : capability;
-        if (!Number.isSafeInteger(id) || id <= 0 || !model || mediaType !== capability || seenIds.has(id) || seenModels.has(model)) continue;
+        if (!Number.isSafeInteger(id) || id <= 0 || !model || !selectionModel || mediaType !== capability || seenIds.has(id) || seenSelectionModels.has(selectionModel)) continue;
         const rawPriceQuota = Number(item.price_quota);
         seenIds.add(id);
-        seenModels.add(model);
+        seenSelectionModels.add(selectionModel);
         models.push({
             id,
             mediaType: capability,
-            model,
-            displayName: typeof item.display_name === "string" && item.display_name.trim() ? item.display_name.trim() : model,
+            model: selectionModel,
+            displayName,
             providerName: typeof item.provider_name === "string" ? item.provider_name.trim() : "",
             apiMode: typeof item.api_mode === "string" ? item.api_mode.trim() : "",
             priceQuota: Number.isFinite(rawPriceQuota) && rawPriceQuota > 0 ? rawPriceQuota : 0,

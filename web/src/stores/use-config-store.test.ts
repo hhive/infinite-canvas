@@ -32,14 +32,39 @@ describe("config authentication cleanup", () => {
 });
 
 describe("applyMediaModels", () => {
-    it("keeps one representative for duplicate normalized model names", () => {
-        useConfigStore.getState().applyMediaModels("image", [imageModel(11, " gpt-image-2 ", "Primary"), imageModel(12, "gpt-image-2", "Fallback")]);
+    it("groups image records by normalized display name", () => {
+        useConfigStore.setState((state) => ({
+            config: {
+                ...state.config,
+                channels: [{ ...state.config.channels[0], models: ["gpt-image-2-1k", "gpt-image-2-2k", "gpt-image-2-4k"] }],
+                imageModels: ["default::gpt-image-2-1k", "default::gpt-image-2-2k", "default::gpt-image-2-4k"],
+                imageModel: "default::gpt-image-2-1k",
+            },
+        }));
+        useConfigStore.getState().applyMediaModels("image", [
+            imageModel(11, "gpt-image-2-2k", " gpt-image-2 "),
+            imageModel(12, "gpt-image-2-4k", "gpt-image-2"),
+            imageModel(13, "gpt-image-2-1k", "gpt-image-2"),
+        ]);
 
         const state = useConfigStore.getState();
-        expect(state.mediaModels.image).toEqual([imageModel(11, "gpt-image-2", "Primary")]);
+        expect(state.mediaModels.image).toEqual([imageModel(11, "gpt-image-2", "gpt-image-2")]);
         expect(state.config.imageModels).toEqual(["default::gpt-image-2"]);
         expect(state.config.channels[0].models.filter((model) => model === "gpt-image-2")).toHaveLength(1);
+        expect(state.config.channels[0].models).not.toEqual(expect.arrayContaining(["gpt-image-2-1k", "gpt-image-2-2k", "gpt-image-2-4k"]));
         expect(state.config.models.filter((model) => model === "default::gpt-image-2")).toHaveLength(1);
+        expect(state.config.imageModel).toBe("default::gpt-image-2");
+    });
+
+    it("does not group video records by display name", () => {
+        const videoModels: MediaModel[] = [
+            { ...imageModel(14, "video-fast", "Video"), mediaType: "video" },
+            { ...imageModel(15, "video-quality", "Video"), mediaType: "video" },
+        ];
+
+        useConfigStore.getState().applyMediaModels("video", videoModels);
+
+        expect(useConfigStore.getState().config.videoModels).toEqual(["default::video-fast", "default::video-quality"]);
     });
 
     it("preserves the current selection when the model still exists", () => {

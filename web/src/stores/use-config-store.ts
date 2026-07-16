@@ -242,14 +242,18 @@ export const useConfigStore = create<ConfigStore>()(
                 })),
             applyMediaModels: (capability, mediaModels) =>
                 set((state) => {
-                    const normalizedMediaModels = uniqueMediaModels(mediaModels);
+                    const normalizedMediaModels = uniqueMediaModels(mediaModels, capability);
                     const firstChannel = state.config.channels[0] || createModelChannel({ id: "default", name: "默认渠道" });
                     const options = normalizedMediaModels.map((item) => encodeChannelModel(firstChannel.id, item.model));
                     const modelKey = capability === "image" ? "imageModel" : "videoModel";
                     const modelsKey = capability === "image" ? "imageModels" : "videoModels";
                     const selected = options.includes(state.config[modelKey]) ? state.config[modelKey] : options[0] || "";
+                    const previousCapabilityModels = new Set(state.config[modelsKey].map((model) => modelOptionName(model)));
                     const channels = [
-                        { ...firstChannel, models: uniqueRawModels([...firstChannel.models, ...normalizedMediaModels.map((item) => item.model)]) },
+                        {
+                            ...firstChannel,
+                            models: uniqueRawModels([...firstChannel.models.filter((model) => !previousCapabilityModels.has(modelOptionName(model))), ...normalizedMediaModels.map((item) => item.model)]),
+                        },
                         ...state.config.channels.slice(1),
                     ];
                     return {
@@ -425,14 +429,16 @@ function uniqueRawModels(models: string[]) {
     return Array.from(new Set((models || []).map((model) => modelOptionName(model).trim()).filter(Boolean)));
 }
 
-function uniqueMediaModels(models: MediaModel[]) {
+function uniqueMediaModels(models: MediaModel[], capability: MediaCapability) {
     const seen = new Set<string>();
     const unique: MediaModel[] = [];
     for (const item of models) {
         const model = item.model.trim();
-        if (!model || seen.has(model)) continue;
-        seen.add(model);
-        unique.push(model === item.model ? item : { ...item, model });
+        const displayName = item.displayName.trim() || model;
+        const selectionModel = capability === "image" ? displayName : model;
+        if (!selectionModel || seen.has(selectionModel)) continue;
+        seen.add(selectionModel);
+        unique.push(selectionModel === item.model && displayName === item.displayName ? item : { ...item, model: selectionModel, displayName });
     }
     return unique;
 }
