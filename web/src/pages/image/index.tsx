@@ -16,7 +16,7 @@ import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { cancelImageTask, requestEdit, requestGeneration, resumeImageTask, type ImageTask, type ImageTaskStatus } from "@/services/api/image";
 import { canResumeImageTask, imageTaskAuthIdentity, readImageWorkbenchTasks, removeImageWorkbenchTask, resolveImageTaskCancel, resumeImageWorkbenchRecord, saveImageWorkbenchTask, type ImageWorkbenchTaskRecord } from "@/services/image-task-storage";
-import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { deleteStoredImages, IMAGE_UPLOAD_ACCEPT, imageMimeTypeFromFilename, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ReferenceImage } from "@/types/image";
@@ -166,7 +166,7 @@ export default function ImagePage() {
     };
 
     const addReferences = async (files?: FileList | null) => {
-        const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
+        const imageFiles = Array.from(files || []).filter((file) => imageMimeTypeFromFilename(file.name));
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
                 const image = await uploadImage(file);
@@ -591,7 +591,7 @@ export default function ImagePage() {
             <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept={IMAGE_UPLOAD_ACCEPT}
                 multiple
                 className="hidden"
                 onChange={(event) => {

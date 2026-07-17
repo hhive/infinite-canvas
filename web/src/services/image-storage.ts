@@ -15,8 +15,28 @@ export type UploadedImage = {
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
 const objectUrls = new Map<string, string>();
 
+const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+    ".pjp": "image/jpeg",
+    ".jfif": "image/jpeg",
+    ".jpe": "image/jpeg",
+    ".pjpeg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+};
+
+export const IMAGE_UPLOAD_ACCEPT = Object.keys(IMAGE_MIME_BY_EXTENSION).join(",");
+
+export function imageMimeTypeFromFilename(filename: string) {
+    const extension = filename.slice(filename.lastIndexOf(".")).toLowerCase();
+    return IMAGE_MIME_BY_EXTENSION[extension];
+}
+
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    const source = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    const mimeType = input instanceof File ? imageMimeTypeFromFilename(input.name) : undefined;
+    const blob = mimeType ? new Blob([source], { type: mimeType }) : source;
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
