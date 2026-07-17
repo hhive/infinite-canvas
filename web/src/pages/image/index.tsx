@@ -14,9 +14,9 @@ import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } f
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
-import { cancelImageTask, requestEdit, requestGeneration, resumeImageTask, type ImageTask, type ImageTaskStatus } from "@/services/api/image";
+import { cancelImageTask, prepareImageEditReferences, requestEdit, requestGeneration, resumeImageTask, type ImageTask, type ImageTaskStatus } from "@/services/api/image";
 import { canResumeImageTask, imageTaskAuthIdentity, readImageWorkbenchTasks, removeImageWorkbenchTask, resolveImageTaskCancel, resumeImageWorkbenchRecord, saveImageWorkbenchTask, type ImageWorkbenchTaskRecord } from "@/services/image-task-storage";
-import { deleteStoredImages, IMAGE_UPLOAD_ACCEPT, imageMimeTypeFromFilename, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { deleteStoredImages, IMAGE_UPLOAD_ACCEPT, INVALID_IMAGE_FORMAT_MESSAGE, isInvalidImageFormatError, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ReferenceImage } from "@/types/image";
@@ -97,6 +97,7 @@ export default function ImagePage() {
     const clearImageCommand = useWorkbenchAgentStore((state) => state.clearImageCommand);
     const processedCommandRef = useRef(0);
     const slotControllersRef = useRef(new Map<string, AbortController>());
+    const generationLockRef = useRef(false);
 
     const model = effectiveConfig.imageModel;
     const canGenerate = Boolean(prompt.trim());
@@ -165,15 +166,30 @@ export default function ImagePage() {
         }
     };
 
+    const addReferenceBatch = async (entries: Array<{ blob: Blob; invalidName: string; uploadedName: (image: UploadedImage) => string }>, includeNamesWhenAllInvalid = false) => {
+        const settled = await Promise.allSettled(entries.map(async (entry) => ({ entry, image: await uploadImage(entry.blob) })));
+        const nextReferences: ReferenceImage[] = [];
+        const invalidNames: string[] = [];
+        const otherErrors: Error[] = [];
+        settled.forEach((result, index) => {
+            if (result.status === "fulfilled") {
+                const { entry, image } = result.value;
+                nextReferences.push({ id: nanoid(), name: entry.uploadedName(image), type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey });
+                return;
+            }
+            if (isInvalidImageFormatError(result.reason)) invalidNames.push(entries[index].invalidName);
+            else otherErrors.push(result.reason instanceof Error ? result.reason : new Error("读取图片失败"));
+        });
+        if (nextReferences.length) setReferences((value) => [...value, ...nextReferences]);
+        if (invalidNames.length && nextReferences.length) message.warning(mixedBatchMessage(nextReferences.length, invalidNames));
+        else if (invalidNames.length) message.error(includeNamesWhenAllInvalid ? `${INVALID_IMAGE_FORMAT_MESSAGE}：${summarizeInvalidNames(invalidNames)}` : INVALID_IMAGE_FORMAT_MESSAGE);
+        if (otherErrors.length) message.error(otherErrors[0].message || "读取图片失败");
+        return { added: nextReferences.length, skipped: invalidNames.length + otherErrors.length };
+    };
+
     const addReferences = async (files?: FileList | null) => {
-        const imageFiles = Array.from(files || []).filter((file) => imageMimeTypeFromFilename(file.name));
-        const nextReferences = await Promise.all(
-            imageFiles.map(async (file) => {
-                const image = await uploadImage(file);
-                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
-            }),
-        );
-        setReferences((value) => [...value, ...nextReferences]);
+        const entries = Array.from(files || []).map((file) => ({ blob: file, invalidName: file.name, uploadedName: () => file.name }));
+        if (entries.length) await addReferenceBatch(entries);
     };
 
     const addReferencesFromClipboard = async () => {
@@ -184,20 +200,22 @@ export default function ImagePage() {
                 message.error("剪切板里没有可读取的图片");
                 return;
             }
-            const nextReferences = await Promise.all(
-                blobs.map(async (blob, index) => {
-                    const image = await uploadImage(blob);
-                    return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
-                }),
+            const result = await addReferenceBatch(
+                blobs.map((blob, index) => ({
+                    blob,
+                    invalidName: `剪贴板图片 ${index + 1}`,
+                    uploadedName: (image: UploadedImage) => `剪贴板图片 ${index + 1}${imageExtension(image.mimeType)}`,
+                })),
+                true,
             );
-            setReferences((value) => [...value, ...nextReferences]);
-            message.success(`已读取 ${nextReferences.length} 张参考图`);
+            if (result.added && !result.skipped) message.success(`已读取 ${result.added} 张参考图`);
         } catch {
             message.error("剪切板里没有可读取的图片");
         }
     };
 
     const generate = async () => {
+        if (generationLockRef.current) return;
         const text = prompt.trim();
         if (!text) {
             message.error("请输入生图提示词");
@@ -211,24 +229,23 @@ export default function ImagePage() {
 
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
-
-        setElapsedMs(0);
+        generationLockRef.current = true;
         setRunning(true);
-        setPreviewLog(null);
-        const slots = Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" as const }));
-        setResults(slots);
-        const batchStartedAt = performance.now();
-        setStartedAt(batchStartedAt);
-
-        const tasks = slots.map((slot, index) => runGenerationSlot(index, slot.id, snapshot));
-
-        const result = await Promise.allSettled(tasks);
-        const successImages = result.flatMap((item) => item.status === "fulfilled" ? [item.value] : []);
-        const successCount = successImages.length;
-        const failCount = generationCount - successCount;
-        const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
-
         try {
+            const requestReferences = await prepareRequestReferences(snapshot.references);
+            if (!requestReferences) return;
+            const requestSnapshot = { ...snapshot, references: requestReferences };
+            setElapsedMs(0);
+            setPreviewLog(null);
+            const slots = Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" as const }));
+            setResults(slots);
+            const batchStartedAt = performance.now();
+            setStartedAt(batchStartedAt);
+            const result = await Promise.allSettled(slots.map((slot, index) => runGenerationSlot(index, slot.id, requestSnapshot)));
+            const successImages = result.flatMap((item) => item.status === "fulfilled" ? [item.value] : []);
+            const successCount = successImages.length;
+            const failCount = generationCount - successCount;
+            const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
             const logImages = successImages;
             await saveLog(
                 buildLog({
@@ -251,6 +268,7 @@ export default function ImagePage() {
             }));
             successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
         } finally {
+            generationLockRef.current = false;
             setRunning(false);
         }
     };
@@ -360,6 +378,17 @@ export default function ImagePage() {
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
+    const prepareRequestReferences = async (items: ReferenceImage[]) => {
+        try {
+            return await prepareImageEditReferences(items);
+        } catch (error) {
+            const referenceIndex = error && typeof error === "object" && "referenceIndex" in error && typeof error.referenceIndex === "number" ? error.referenceIndex : 0;
+            const name = items[referenceIndex]?.name || `参考图 ${referenceIndex + 1}`;
+            message.error(isInvalidImageFormatError(error) ? `${INVALID_IMAGE_FORMAT_MESSAGE}：${name}` : error instanceof Error ? error.message : "读取图片失败");
+            return null;
+        }
+    };
+
     const runGenerationSlot = async (index: number, slotId: string, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
         const itemStartedAt = performance.now();
         const controller = new AbortController();
@@ -417,14 +446,19 @@ export default function ImagePage() {
     };
 
     const retryResult = async (index: number) => {
+        if (generationLockRef.current) return;
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
-        setPreviewLog(null);
-        const slotId = nanoid();
-        setResults((value) => value.map((item, itemIndex) => (itemIndex === index ? { id: slotId, status: "pending" } : item)));
-        const retryStartedAt = performance.now();
+        generationLockRef.current = true;
+        setRunning(true);
         try {
-            const image = await runGenerationSlot(index, slotId, snapshot);
+            const requestReferences = await prepareRequestReferences(snapshot.references);
+            if (!requestReferences) return;
+            setPreviewLog(null);
+            const slotId = nanoid();
+            setResults((value) => value.map((item, itemIndex) => (itemIndex === index ? { id: slotId, status: "pending" } : item)));
+            const retryStartedAt = performance.now();
+            const image = await runGenerationSlot(index, slotId, { ...snapshot, references: requestReferences });
             const logImage = image;
             setResults((value) => updateResultAt(value, index, { image }));
             await saveLog(
@@ -448,6 +482,9 @@ export default function ImagePage() {
             message.success("重试成功");
         } catch {
             // runGenerationSlot 已经把结果状态更新为 failed
+        } finally {
+            generationLockRef.current = false;
+            setRunning(false);
         }
     };
 
@@ -906,6 +943,22 @@ function moveListItem<T>(items: T[], index: number, offset: number) {
     const next = [...items];
     [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
     return next;
+}
+
+function imageExtension(mimeType: string) {
+    if (mimeType === "image/jpeg") return ".jpg";
+    if (mimeType === "image/webp") return ".webp";
+    return ".png";
+}
+
+function summarizeInvalidNames(names: string[]) {
+    const visible = names.slice(0, 3).join("、");
+    const remaining = names.length - 3;
+    return remaining > 0 ? `${visible}，另有 ${remaining} 张` : visible;
+}
+
+function mixedBatchMessage(added: number, invalidNames: string[]) {
+    return `已添加 ${added} 张参考图，跳过 ${invalidNames.length} 张无效图片：${summarizeInvalidNames(invalidNames)}`;
 }
 
 function ReferenceOrderButtons({ index, total, onMove }: { index: number; total: number; onMove: (offset: number) => void }) {

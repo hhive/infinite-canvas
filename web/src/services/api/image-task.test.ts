@@ -3,12 +3,35 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { cancelImageTask, fetchChannelModels, probeImageSession, requestEdit, requestGeneration, waitForImageTask, type ImageTask } from "@/services/api/image";
 import { defaultConfig } from "@/stores/use-config-store";
+import type { ReferenceImage } from "@/types/image";
 
 vi.mock("axios", () => ({
     default: { get: vi.fn(), post: vi.fn(), isAxiosError: vi.fn(), isCancel: vi.fn(() => false) },
 }));
 
 const runningTask: ImageTask = { task_id: "task-1", status: "running", model_config_id: 1, model: "gpt-image-2", poll_after_ms: 500 };
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00]);
+const WEBP_BYTES = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x01, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x01]);
+const GIF_BYTES = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+const FORMAT_ERROR_MESSAGE = "图片格式无效，仅支持有效的 PNG、JPEG 或 WebP 图片";
+
+function dataUrl(mimeType: string, bytes: Uint8Array) {
+    return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
+}
+
+function imageRequestConfig(model: string) {
+    return {
+        ...defaultConfig,
+        apiKey: "sk-test",
+        channels: defaultConfig.channels.map((channel) => ({ ...channel, apiKey: "sk-test", models: [model] })),
+        model: `default::${model}`,
+        imageModel: `default::${model}`,
+        size: "1024x1024",
+        quality: "low",
+        count: "1",
+    };
+}
 
 afterEach(() => vi.clearAllMocks());
 
@@ -80,8 +103,8 @@ describe("image edit task payload", () => {
             quality: "low",
             count: "1",
         };
-        const reference = { id: "ref-1", name: "reference.png", type: "image/png", dataUrl: "data:image/png;base64,cmVm" };
-        const mask = { id: "mask-1", name: "mask.png", type: "image/png", dataUrl: "data:image/png;base64,bWFzaw==" };
+        const reference = { id: "ref-1", name: "reference.png", type: "image/png", dataUrl: dataUrl("image/png", PNG_BYTES) };
+        const mask = { id: "mask-1", name: "mask.jpg", type: "image/jpeg", dataUrl: dataUrl("image/jpeg", JPEG_BYTES) };
 
         await expect(requestEdit(config, "edit", [reference], mask)).resolves.toHaveLength(1);
 
@@ -96,6 +119,97 @@ describe("image edit task payload", () => {
             }),
             expect.objectContaining({ headers: { Authorization: "Bearer sk-test" } }),
         );
+    });
+
+    it("normalizes declared MIME conflicts by signature before the async task POST", async () => {
+        const model = "gpt-image-signature-boundary";
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 27, model }] });
+        await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
+        vi.mocked(axios.post).mockResolvedValueOnce({
+            data: {
+                task_id: "task-signature-boundary",
+                status: "completed",
+                model_config_id: 27,
+                model,
+                poll_after_ms: 500,
+                result: { data: [{ b64_json: "aW1hZ2U=" }] },
+            },
+        });
+        const references = [
+            { id: "png", name: "declared-gif.png", type: "image/gif", dataUrl: dataUrl("image/gif", PNG_BYTES) },
+            { id: "jpeg", name: "declared-png.jpg", type: "image/png", dataUrl: dataUrl("image/png", JPEG_BYTES) },
+            { id: "webp", name: "declared-binary.webp", type: "application/octet-stream", dataUrl: dataUrl("application/octet-stream", WEBP_BYTES) },
+        ];
+        const mask = { id: "mask", name: "mask.png", type: "image/gif", dataUrl: dataUrl("image/gif", PNG_BYTES) };
+
+        await expect(requestEdit(imageRequestConfig(model), "edit", references, mask)).resolves.toHaveLength(1);
+
+        const requestBody = vi.mocked(axios.post).mock.calls[0]?.[1] as { images: Array<{ image_url: string }>; mask: { image_url: string } };
+        expect(requestBody.images).toEqual([
+            { image_url: dataUrl("image/png", PNG_BYTES) },
+            { image_url: dataUrl("image/jpeg", JPEG_BYTES) },
+            { image_url: dataUrl("image/webp", WEBP_BYTES) },
+        ]);
+        expect(requestBody.mask).toEqual({ image_url: dataUrl("image/png", PNG_BYTES) });
+    });
+
+    it("rejects an unsupported signature before posting an async image task", async () => {
+        const model = "gpt-image-invalid-signature";
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 28, model }] });
+        await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
+        const reference = { id: "fake-png", name: "fake.png", type: "image/png", dataUrl: dataUrl("image/png", GIF_BYTES) };
+
+        await expect(requestEdit(imageRequestConfig(model), "edit", [reference])).rejects.toThrow(FORMAT_ERROR_MESSAGE);
+
+        expect(axios.post).not.toHaveBeenCalled();
+    });
+
+    it("reuses a prepared reference array across repeated image edit requests without decoding or copying again", async () => {
+        const imageApi = (await import("@/services/api/image")) as typeof import("@/services/api/image") & {
+            prepareImageEditReferences?: (references: ReferenceImage[]) => Promise<ReferenceImage[]>;
+        };
+        expect(imageApi.prepareImageEditReferences).toBeTypeOf("function");
+        if (!imageApi.prepareImageEditReferences) return;
+        const references: ReferenceImage[] = [
+            { id: "prepared-png", name: "prepared.png", type: "image/gif", dataUrl: dataUrl("image/gif", PNG_BYTES) },
+            { id: "prepared-webp", name: "prepared.webp", type: "application/octet-stream", dataUrl: dataUrl("application/octet-stream", WEBP_BYTES) },
+        ];
+        const atobSpy = vi.spyOn(globalThis, "atob");
+        const sliceSpy = vi.spyOn(Blob.prototype, "slice");
+        try {
+            const prepared = await imageApi.prepareImageEditReferences(references);
+            const atobCallsAfterPrepare = atobSpy.mock.calls.length;
+            const sliceCallsAfterPrepare = sliceSpy.mock.calls.length;
+
+            expect(prepared).not.toBe(references);
+            expect(prepared.map((item) => item.dataUrl)).toEqual([dataUrl("image/png", PNG_BYTES), dataUrl("image/webp", WEBP_BYTES)]);
+            expect(atobCallsAfterPrepare).toBe(2);
+            expect(sliceCallsAfterPrepare).toBe(2);
+
+            const model = "gpt-image-prepared-references";
+            vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 29, model }] });
+            await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
+            vi.mocked(axios.post).mockResolvedValue({
+                data: {
+                    task_id: "task-prepared-references",
+                    status: "completed",
+                    model_config_id: 29,
+                    model,
+                    poll_after_ms: 500,
+                    result: { data: [{ b64_json: "aW1hZ2U=" }] },
+                },
+            });
+
+            await requestEdit(imageRequestConfig(model), "first edit", prepared);
+            await requestEdit(imageRequestConfig(model), "second edit", prepared);
+
+            expect(axios.post).toHaveBeenCalledTimes(2);
+            expect(atobSpy).toHaveBeenCalledTimes(atobCallsAfterPrepare);
+            expect(sliceSpy).toHaveBeenCalledTimes(sliceCallsAfterPrepare);
+        } finally {
+            atobSpy.mockRestore();
+            sliceSpy.mockRestore();
+        }
     });
 });
 

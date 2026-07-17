@@ -98,6 +98,7 @@ export type ImageTask = {
 
 const imageModelConfigIDs = new Map<string, number>();
 const imageModelDisplayNames = new Set<string>();
+const preparedImageEditReferenceDataUrls = new WeakMap<ReferenceImage[], string[]>();
 const IMAGE_ASYNC_PATH = "/v1/images/generations/async";
 const IMAGE_TASK_PATH = "/v1/images/tasks";
 
@@ -752,6 +753,28 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
 }
 
+export async function prepareImageEditReferences(references: ReferenceImage[]) {
+    const dataUrls: string[] = [];
+    for (const [index, reference] of references.entries()) {
+        try {
+            dataUrls.push(await imageToDataUrl(reference));
+        } catch (error) {
+            const indexedError = error instanceof Error ? error : new Error("读取图片失败");
+            Object.assign(indexedError, { referenceIndex: index });
+            throw indexedError;
+        }
+    }
+    const prepared = references.map((reference, index) => ({
+        ...reference,
+        type: dataUrls[index].slice(5, dataUrls[index].indexOf(";")),
+        dataUrl: dataUrls[index],
+        url: undefined,
+        storageKey: undefined,
+    }));
+    preparedImageEditReferenceDataUrls.set(prepared, dataUrls);
+    return prepared;
+}
+
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: ImageTaskRequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
@@ -761,7 +784,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     try {
         await modelConfigID(requestConfig.model, requestConfig);
         const model = modelOptionName(requestConfig.model);
-        const inputImages = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        const inputImages = preparedImageEditReferenceDataUrls.get(references) || (await Promise.all(references.map((image) => imageToDataUrl(image))));
         const maskImage = mask ? await imageToDataUrl(mask) : undefined;
         const task = await submitImageTask(
             requestConfig,
