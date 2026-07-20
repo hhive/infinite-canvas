@@ -3,7 +3,7 @@ import axios from "axios";
 export type MediaCapability = "image" | "video";
 
 export type MediaModel = {
-    id: number;
+    id: number | string;
     mediaType: MediaCapability;
     model: string;
     displayName: string;
@@ -30,10 +30,16 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
     for (const raw of response.data) {
         if (!raw || typeof raw !== "object") continue;
         const item = raw as Record<string, unknown>;
-        const id = Number(item.id);
         const model = typeof item.model === "string" ? item.model.trim() : "";
+        if (capability === "image") {
+            if (!model || seenSelectionModels.has(model)) continue;
+            seenSelectionModels.add(model);
+            models.push({ id: model, mediaType: "image", model, displayName: model, providerName: "", apiMode: "", priceQuota: 0 });
+            continue;
+        }
+        const id = Number(item.id);
         const displayName = typeof item.display_name === "string" && item.display_name.trim() ? item.display_name.trim() : model;
-        const selectionModel = capability === "image" ? displayName : model;
+        const selectionModel = model;
         const mediaType = typeof item.media_type === "string" ? item.media_type : capability;
         if (!Number.isSafeInteger(id) || id <= 0 || !model || !selectionModel || mediaType !== capability || seenIds.has(id) || seenSelectionModels.has(selectionModel)) continue;
         const rawPriceQuota = Number(item.price_quota);

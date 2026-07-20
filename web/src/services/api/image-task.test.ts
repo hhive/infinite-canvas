@@ -1,7 +1,7 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { cancelImageTask, fetchChannelModels, probeImageSession, requestEdit, requestGeneration, waitForImageTask, type ImageTask } from "@/services/api/image";
+import { cancelImageTask, fetchChannelModels, fetchImageModels, probeImageSession, requestEdit, requestGeneration, waitForImageTask, type ImageTask } from "@/services/api/image";
 import { defaultConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 
@@ -80,15 +80,15 @@ describe("image session readiness", () => {
 });
 
 describe("image edit task payload", () => {
-    it("submits the logical display name with references and a mask", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "gpt-image-2-1k", display_name: "gpt-image-2" }] });
+    it("submits the public model name with references and a mask", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "gpt-image-2" }] });
         await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
                 task_id: "task-edit",
                 status: "completed",
-                model_config_id: 7,
-                model: "gpt-image-2-1k",
+                model_config_id: 0,
+                model: "gpt-image-2",
                 poll_after_ms: 500,
                 result: { data: [{ b64_json: "aW1hZ2U=" }] },
             },
@@ -123,13 +123,13 @@ describe("image edit task payload", () => {
 
     it("normalizes declared MIME conflicts by signature before the async task POST", async () => {
         const model = "gpt-image-signature-boundary";
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 27, model }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model }] });
         await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
                 task_id: "task-signature-boundary",
                 status: "completed",
-                model_config_id: 27,
+                model_config_id: 0,
                 model,
                 poll_after_ms: 500,
                 result: { data: [{ b64_json: "aW1hZ2U=" }] },
@@ -145,17 +145,13 @@ describe("image edit task payload", () => {
         await expect(requestEdit(imageRequestConfig(model), "edit", references, mask)).resolves.toHaveLength(1);
 
         const requestBody = vi.mocked(axios.post).mock.calls[0]?.[1] as { images: Array<{ image_url: string }>; mask: { image_url: string } };
-        expect(requestBody.images).toEqual([
-            { image_url: dataUrl("image/png", PNG_BYTES) },
-            { image_url: dataUrl("image/jpeg", JPEG_BYTES) },
-            { image_url: dataUrl("image/webp", WEBP_BYTES) },
-        ]);
+        expect(requestBody.images).toEqual([{ image_url: dataUrl("image/png", PNG_BYTES) }, { image_url: dataUrl("image/jpeg", JPEG_BYTES) }, { image_url: dataUrl("image/webp", WEBP_BYTES) }]);
         expect(requestBody.mask).toEqual({ image_url: dataUrl("image/png", PNG_BYTES) });
     });
 
     it("rejects an unsupported signature before posting an async image task", async () => {
         const model = "gpt-image-invalid-signature";
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 28, model }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model }] });
         await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
         const reference = { id: "fake-png", name: "fake.png", type: "image/png", dataUrl: dataUrl("image/png", GIF_BYTES) };
 
@@ -187,13 +183,13 @@ describe("image edit task payload", () => {
             expect(sliceCallsAfterPrepare).toBe(2);
 
             const model = "gpt-image-prepared-references";
-            vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 29, model }] });
+            vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model }] });
             await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
             vi.mocked(axios.post).mockResolvedValue({
                 data: {
                     task_id: "task-prepared-references",
                     status: "completed",
-                    model_config_id: 29,
+                    model_config_id: 0,
                     model,
                     poll_after_ms: 500,
                     result: { data: [{ b64_json: "aW1hZ2U=" }] },
@@ -213,16 +209,21 @@ describe("image edit task payload", () => {
     });
 });
 
-describe("image model config mapping", () => {
-    it("submits a logical display name when only suffixed internal models exist", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 17, model: "gpt-image-2-4k", display_name: "gpt-image-2" }] });
+describe("image model availability", () => {
+    it("returns trimmed unique public names from model-only records", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: " gpt-image-2 " }, { model: "gpt-image-2" }, { model: "GPT-Image-2" }, { model: "  " }, null] });
+        await expect(fetchImageModels({ baseUrl: "/v1", apiKey: "", apiFormat: "openai" })).resolves.toEqual(["gpt-image-2", "GPT-Image-2"]);
+    });
+
+    it("submits the public name for generation", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "gpt-image-2" }] });
         await fetchChannelModels({ id: "display-name", name: "display-name", baseUrl: "/v1", apiKey: "", apiFormat: "openai", models: [] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
                 task_id: "task-display-name",
                 status: "completed",
-                model_config_id: 17,
-                model: "gpt-image-2-4k",
+                model_config_id: 0,
+                model: "gpt-image-2",
                 poll_after_ms: 500,
                 result: { data: [{ b64_json: "aW1hZ2U=" }] },
             },
@@ -235,21 +236,17 @@ describe("image model config mapping", () => {
         };
 
         await expect(requestGeneration(config, "draw")).resolves.toHaveLength(1);
-        expect(axios.post).toHaveBeenCalledWith(
-            "/v1/images/generations/async",
-            expect.objectContaining({ model: "gpt-image-2", model_display_name: "gpt-image-2" }),
-            expect.anything(),
-        );
+        expect(axios.post).toHaveBeenCalledWith("/v1/images/generations/async", expect.objectContaining({ model: "gpt-image-2", model_display_name: "gpt-image-2" }), expect.anything());
     });
 
-    it("keeps a suffixed internal model on the exact request path", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 18, model: "gpt-image-exact-1k", display_name: "gpt-image-exact" }] });
+    it("always includes the public name for generation", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "gpt-image-exact-1k" }] });
         await fetchChannelModels({ id: "exact-name", name: "exact-name", baseUrl: "/v1", apiKey: "", apiFormat: "openai", models: [] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
                 task_id: "task-exact-model",
                 status: "completed",
-                model_config_id: 18,
+                model_config_id: 0,
                 model: "gpt-image-exact-1k",
                 poll_after_ms: 500,
                 result: { data: [{ b64_json: "aW1hZ2U=" }] },
@@ -265,16 +262,16 @@ describe("image model config mapping", () => {
         await expect(requestGeneration(config, "draw")).resolves.toHaveLength(1);
         const requestBody = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
         expect(requestBody.model).toBe("gpt-image-exact-1k");
-        expect(requestBody).not.toHaveProperty("model_display_name");
+        expect(requestBody.model_display_name).toBe("gpt-image-exact-1k");
     });
 
     it("refreshes models once before generation when the mapping is missing", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 9, model: "gpt-image-refresh" }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "gpt-image-refresh" }] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
                 task_id: "task-refresh",
                 status: "completed",
-                model_config_id: 9,
+                model_config_id: 0,
                 model: "gpt-image-refresh",
                 poll_after_ms: 500,
                 result: { data: [{ b64_json: "aW1hZ2U=" }] },
@@ -293,7 +290,7 @@ describe("image model config mapping", () => {
     });
 
     it("reports a missing server model after a successful refresh", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 10, model: "other-image-model" }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "other-image-model" }] });
         const config = {
             ...defaultConfig,
             channels: defaultConfig.channels.map((channel) => ({ ...channel, models: ["gpt-image-missing"] })),
@@ -302,6 +299,19 @@ describe("image model config mapping", () => {
         };
 
         await expect(requestGeneration(config, "draw")).rejects.toThrow("当前模型 gpt-image-missing 没有可用的图片站配置");
+        expect(axios.post).not.toHaveBeenCalled();
+    });
+
+    it("reports the refresh failure when availability cannot be loaded", async () => {
+        vi.mocked(axios.get).mockRejectedValueOnce(new Error("model service unavailable"));
+        const config = {
+            ...defaultConfig,
+            channels: defaultConfig.channels.map((channel) => ({ ...channel, models: ["gpt-image-refresh-failed"] })),
+            model: "default::gpt-image-refresh-failed",
+            imageModel: "default::gpt-image-refresh-failed",
+        };
+
+        await expect(requestGeneration(config, "draw")).rejects.toThrow("model service unavailable");
         expect(axios.post).not.toHaveBeenCalled();
     });
 });

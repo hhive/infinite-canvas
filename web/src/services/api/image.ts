@@ -96,8 +96,7 @@ export type ImageTask = {
     error_message?: string;
 };
 
-const imageModelConfigIDs = new Map<string, number>();
-const imageModelDisplayNames = new Set<string>();
+const imageModelAvailability = new Set<string>();
 const preparedImageEditReferenceDataUrls = new WeakMap<ReferenceImage[], string[]>();
 const IMAGE_ASYNC_PATH = "/v1/images/generations/async";
 const IMAGE_TASK_PATH = "/v1/images/tasks";
@@ -167,15 +166,12 @@ export async function resumeImageTask(taskId: string, apiKey = "", options?: Ima
     return waitForImageTask(task, apiKey, options);
 }
 
-async function modelConfigID(model: string, config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
+async function ensureImageModelAvailable(model: string, config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     const modelName = modelOptionName(model);
-    let id = imageModelConfigIDs.get(modelName);
-    if (!id) {
+    if (!imageModelAvailability.has(modelName)) {
         await fetchImageModels(config);
-        id = imageModelConfigIDs.get(modelName);
     }
-    if (!id) throw new Error(`当前模型 ${modelName} 没有可用的图片站配置`);
-    return id;
+    if (!imageModelAvailability.has(modelName)) throw new Error(`当前模型 ${modelName} 没有可用的图片站配置`);
 }
 
 const QUALITY_BASE: Record<string, number> = {
@@ -732,13 +728,13 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     try {
-        await modelConfigID(requestConfig.model, requestConfig);
+        await ensureImageModelAvailable(requestConfig.model, requestConfig);
         const model = modelOptionName(requestConfig.model);
         const task = await submitImageTask(
             requestConfig,
             {
                 model,
-                ...(imageModelDisplayNames.has(model) ? { model_display_name: model } : {}),
+                model_display_name: model,
                 prompt: withSystemPrompt(requestConfig, prompt),
                 n,
                 ...(quality ? { quality } : {}),
@@ -782,7 +778,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     try {
-        await modelConfigID(requestConfig.model, requestConfig);
+        await ensureImageModelAvailable(requestConfig.model, requestConfig);
         const model = modelOptionName(requestConfig.model);
         const inputImages = preparedImageEditReferenceDataUrls.get(references) || (await Promise.all(references.map((image) => imageToDataUrl(image))));
         const maskImage = mask ? await imageToDataUrl(mask) : undefined;
@@ -790,7 +786,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             requestConfig,
             {
                 model,
-                ...(imageModelDisplayNames.has(model) ? { model_display_name: model } : {}),
+                model_display_name: model,
                 prompt: withSystemPrompt(requestConfig, requestPrompt),
                 n,
                 ...(quality ? { quality } : {}),
@@ -836,19 +832,16 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {
-        const response = await axios.get<Array<{ id: number; model: string; display_name?: string }>>("/v1/models", { headers: sameOriginHeaders(config.apiKey), withCredentials: true });
-        imageModelConfigIDs.clear();
-        imageModelDisplayNames.clear();
-        response.data.forEach((item) => {
-            const model = item.model.trim();
-            const displayName = item.display_name?.trim() || "";
-            if (model) imageModelConfigIDs.set(model, item.id);
-            if (displayName) {
-                if (!imageModelConfigIDs.has(displayName)) imageModelConfigIDs.set(displayName, item.id);
-                imageModelDisplayNames.add(displayName);
-            }
-        });
-        return response.data.map((model) => model.model).sort((a, b) => a.localeCompare(b));
+        const response = await axios.get<unknown>("/v1/models", { headers: sameOriginHeaders(config.apiKey), withCredentials: true });
+        if (!Array.isArray(response.data)) throw new Error("模型接口返回格式无效");
+        imageModelAvailability.clear();
+        for (const raw of response.data) {
+            if (!isRecord(raw)) continue;
+            const item: Record<string, unknown> = raw;
+            const model = typeof item.model === "string" ? item.model.trim() : "";
+            if (model) imageModelAvailability.add(model);
+        }
+        return Array.from(imageModelAvailability).sort((a, b) => a.localeCompare(b));
     } catch (error) {
         throw new Error(readAxiosError(error, "读取模型失败"));
     }

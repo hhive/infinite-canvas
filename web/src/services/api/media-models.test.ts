@@ -8,18 +8,14 @@ vi.mock("axios", () => ({ default: { get: vi.fn() } }));
 afterEach(() => vi.clearAllMocks());
 
 describe("fetchMediaModels", () => {
-    it("loads and validates image models with the media filter", async () => {
+    it("loads model-only image records and uses the public name as identity", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({
-            data: [
-                { id: 2, media_type: "image", model: "gpt-image-2", display_name: "GPT Image", provider_name: "openai", api_mode: "images" },
-                { id: 2, media_type: "image", model: "duplicate" },
-                { id: 7, media_type: "video", model: "wrong-capability" },
-                { id: "bad", media_type: "image", model: "invalid" },
-            ],
+            data: [{ model: " gpt-image-2 " }, { model: "gpt-image-2" }, { model: "GPT-Image-2" }, { model: "   " }, null, "not-an-object"],
         });
 
         await expect(fetchMediaModels("image", "sk-test")).resolves.toEqual([
-            { id: 2, mediaType: "image", model: "GPT Image", displayName: "GPT Image", providerName: "openai", apiMode: "images", priceQuota: 0 },
+            { id: "gpt-image-2", mediaType: "image", model: "gpt-image-2", displayName: "gpt-image-2", providerName: "", apiMode: "", priceQuota: 0 },
+            { id: "GPT-Image-2", mediaType: "image", model: "GPT-Image-2", displayName: "GPT-Image-2", providerName: "", apiMode: "", priceQuota: 0 },
         ]);
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "image" }, headers: { Authorization: "Bearer sk-test" }, withCredentials: true }));
     });
@@ -27,34 +23,6 @@ describe("fetchMediaModels", () => {
     it("accepts video responses without a redundant media_type field", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "openai_videos_v2", price_quota: 12 }] });
         await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "openai_videos_v2", priceQuota: 12 }]);
-    });
-
-    it("groups image records by normalized display name", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({
-            data: [
-                { id: 11, media_type: "image", model: "gpt-image-2-2k", display_name: " gpt-image-2 ", provider_name: "provider-a", api_mode: "images", price_quota: 8 },
-                { id: 12, media_type: "image", model: "gpt-image-2-4k", display_name: "gpt-image-2", provider_name: "provider-b", api_mode: "images", price_quota: 3 },
-                { id: 13, media_type: "image", model: "gpt-image-2-1k", display_name: "gpt-image-2", provider_name: "provider-c", api_mode: "images", price_quota: 2 },
-            ],
-        });
-
-        await expect(fetchMediaModels("image")).resolves.toEqual([
-            { id: 11, mediaType: "image", model: "gpt-image-2", displayName: "gpt-image-2", providerName: "provider-a", apiMode: "images", priceQuota: 8 },
-        ]);
-    });
-
-    it("keeps different and case-distinct image display names separate", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({
-            data: [
-                { id: 13, media_type: "image", model: "same-internal", display_name: "GPT-Image-2" },
-                { id: 14, media_type: "image", model: "same-internal", display_name: "gpt-image-2" },
-            ],
-        });
-
-        await expect(fetchMediaModels("image")).resolves.toMatchObject([
-            { id: 13, model: "GPT-Image-2" },
-            { id: 14, model: "gpt-image-2" },
-        ]);
     });
 
     it("keeps video records distinct when only their display names match", async () => {
