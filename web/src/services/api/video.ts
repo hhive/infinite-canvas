@@ -89,6 +89,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
         const response = await axios.post<MediaVideoTask>(
             VIDEO_PATH,
             {
+                model,
                 model_config_id: modelConfigId,
                 prompt,
                 seconds: normalizeSeedanceDuration(config.videoSeconds),
