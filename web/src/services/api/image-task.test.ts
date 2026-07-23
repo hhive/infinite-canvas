@@ -33,6 +33,13 @@ function imageRequestConfig(model: string) {
     };
 }
 
+function openAIModelList(...ids: string[]) {
+    return {
+        object: "list",
+        data: ids.map((id) => ({ id, object: "model", created: 0, owned_by: "media-playground" })),
+    };
+}
+
 afterEach(() => vi.clearAllMocks());
 
 describe("image task cancellation boundaries", () => {
@@ -81,7 +88,7 @@ describe("image session readiness", () => {
 
 describe("image edit task payload", () => {
     it("submits the public model name with references and a mask", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "gpt-image-2" }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList("gpt-image-2") });
         await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
@@ -123,7 +130,7 @@ describe("image edit task payload", () => {
 
     it("normalizes declared MIME conflicts by signature before the async task POST", async () => {
         const model = "gpt-image-signature-boundary";
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList(model) });
         await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
@@ -151,7 +158,7 @@ describe("image edit task payload", () => {
 
     it("rejects an unsupported signature before posting an async image task", async () => {
         const model = "gpt-image-invalid-signature";
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList(model) });
         await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
         const reference = { id: "fake-png", name: "fake.png", type: "image/png", dataUrl: dataUrl("image/png", GIF_BYTES) };
 
@@ -183,7 +190,7 @@ describe("image edit task payload", () => {
             expect(sliceCallsAfterPrepare).toBe(2);
 
             const model = "gpt-image-prepared-references";
-            vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model }] });
+            vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList(model) });
             await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
             vi.mocked(axios.post).mockResolvedValue({
                 data: {
@@ -210,13 +217,13 @@ describe("image edit task payload", () => {
 });
 
 describe("image model availability", () => {
-    it("returns trimmed unique public names from model-only records", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: " gpt-image-2 " }, { model: "gpt-image-2" }, { model: "GPT-Image-2" }, { model: "  " }, null] });
+    it("returns trimmed unique public ids from an OpenAI-compatible model list", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: { object: "list", data: [{ id: " gpt-image-2 " }, { id: "gpt-image-2" }, { id: "GPT-Image-2" }, { id: "  " }, null] } });
         await expect(fetchImageModels({ baseUrl: "/v1", apiKey: "", apiFormat: "openai" })).resolves.toEqual(["gpt-image-2", "GPT-Image-2"]);
     });
 
     it("submits the public name for generation", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "gpt-image-2" }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList("gpt-image-2") });
         await fetchChannelModels({ id: "display-name", name: "display-name", baseUrl: "/v1", apiKey: "", apiFormat: "openai", models: [] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
@@ -240,7 +247,7 @@ describe("image model availability", () => {
     });
 
     it("always includes the public name for generation", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "gpt-image-exact-1k" }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList("gpt-image-exact-1k") });
         await fetchChannelModels({ id: "exact-name", name: "exact-name", baseUrl: "/v1", apiKey: "", apiFormat: "openai", models: [] });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
@@ -266,7 +273,7 @@ describe("image model availability", () => {
     });
 
     it("refreshes models once before generation when the mapping is missing", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "gpt-image-refresh" }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList("gpt-image-refresh") });
         vi.mocked(axios.post).mockResolvedValueOnce({
             data: {
                 task_id: "task-refresh",
@@ -290,7 +297,7 @@ describe("image model availability", () => {
     });
 
     it("reports a missing server model after a successful refresh", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ model: "other-image-model" }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList("other-image-model") });
         const config = {
             ...defaultConfig,
             channels: defaultConfig.channels.map((channel) => ({ ...channel, models: ["gpt-image-missing"] })),

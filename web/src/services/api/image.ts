@@ -833,12 +833,12 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {
         const response = await axios.get<unknown>("/v1/models", { headers: sameOriginHeaders(config.apiKey), withCredentials: true });
-        if (!Array.isArray(response.data)) throw new Error("模型接口返回格式无效");
+        if (!isRecord(response.data) || response.data.object !== "list" || !Array.isArray(response.data.data)) throw new Error("模型接口返回格式无效");
         imageModelAvailability.clear();
-        for (const raw of response.data) {
+        for (const raw of response.data.data) {
             if (!isRecord(raw)) continue;
             const item: Record<string, unknown> = raw;
-            const model = typeof item.model === "string" ? item.model.trim() : "";
+            const model = typeof item.id === "string" ? item.id.trim() : "";
             if (model) imageModelAvailability.add(model);
         }
         return Array.from(imageModelAvailability).sort((a, b) => a.localeCompare(b));

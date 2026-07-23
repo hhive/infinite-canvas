@@ -19,24 +19,27 @@ function authHeaders(apiKey: string) {
 export async function fetchMediaModels(capability: MediaCapability, apiKey = "", signal?: AbortSignal): Promise<MediaModel[]> {
     const response = await axios.get<unknown>("/v1/models", {
         headers: authHeaders(apiKey),
-        params: { media_type: capability },
+        ...(capability === "video" ? { params: { media_type: "video" } } : {}),
         signal,
         withCredentials: true,
     });
-    if (!Array.isArray(response.data)) throw new Error(`${capability === "image" ? "图片" : "视频"}模型接口返回格式无效`);
+    const imageEnvelope = response.data && typeof response.data === "object" && !Array.isArray(response.data) ? (response.data as Record<string, unknown>) : null;
+    const records = capability === "image" ? (imageEnvelope?.object === "list" ? imageEnvelope.data : undefined) : response.data;
+    if (!Array.isArray(records)) throw new Error(`${capability === "image" ? "图片" : "视频"}模型接口返回格式无效`);
     const seenIds = new Set<number>();
     const seenSelectionModels = new Set<string>();
     const models: MediaModel[] = [];
-    for (const raw of response.data) {
+    for (const raw of records) {
         if (!raw || typeof raw !== "object") continue;
         const item = raw as Record<string, unknown>;
-        const model = typeof item.model === "string" ? item.model.trim() : "";
         if (capability === "image") {
+            const model = typeof item.id === "string" ? item.id.trim() : "";
             if (!model || seenSelectionModels.has(model)) continue;
             seenSelectionModels.add(model);
             models.push({ id: model, mediaType: "image", model, displayName: model, providerName: "", apiMode: "", priceQuota: 0 });
             continue;
         }
+        const model = typeof item.model === "string" ? item.model.trim() : "";
         const id = Number(item.id);
         const displayName = typeof item.display_name === "string" && item.display_name.trim() ? item.display_name.trim() : model;
         const selectionModel = model;
