@@ -10,6 +10,9 @@ export type MediaModel = {
     providerName: string;
     apiMode: string;
     priceQuota: number;
+    maxReferenceImages?: number;
+    maxReferenceVideos?: number;
+    maxReferenceAudios?: number;
 };
 
 function authHeaders(apiKey: string) {
@@ -42,7 +45,7 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
         const model = typeof item.model === "string" ? item.model.trim() : "";
         const id = Number(item.id);
         const displayName = typeof item.display_name === "string" && item.display_name.trim() ? item.display_name.trim() : model;
-        const selectionModel = model;
+        const selectionModel = displayName;
         const mediaType = typeof item.media_type === "string" ? item.media_type : capability;
         if (!Number.isSafeInteger(id) || id <= 0 || !model || !selectionModel || mediaType !== capability || seenIds.has(id) || seenSelectionModels.has(selectionModel)) continue;
         const rawPriceQuota = Number(item.price_quota);
@@ -56,7 +59,15 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
             providerName: typeof item.provider_name === "string" ? item.provider_name.trim() : "",
             apiMode: typeof item.api_mode === "string" ? item.api_mode.trim() : "",
             priceQuota: Number.isFinite(rawPriceQuota) && rawPriceQuota > 0 ? rawPriceQuota : 0,
+            maxReferenceImages: referenceLimit(item.max_reference_images),
+            maxReferenceVideos: referenceLimit(item.max_reference_videos),
+            maxReferenceAudios: referenceLimit(item.max_reference_audios),
         });
     }
     return models;
+}
+
+function referenceLimit(value: unknown) {
+    const limit = Number(value);
+    return Number.isSafeInteger(limit) && limit >= 0 ? limit : 0;
 }

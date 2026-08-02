@@ -1,7 +1,7 @@
 import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
-import { boolConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/lib/seedance-video";
+import { boolConfig, isSeedanceVideoModel, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/lib/seedance-video";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
@@ -23,7 +23,7 @@ export type VideoGenerationTaskState =
     | { status: "failed"; task: VideoGenerationTask; error: string };
 
 type RequestOptions = { signal?: AbortSignal; onTask?: (task: VideoGenerationTask) => void | Promise<void> };
-type VideoModel = { id: number; model: string; media_type?: string };
+type VideoModel = { id: number; model: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number };
 type UploadResponse = { upload_token?: string; token?: string; id?: string | number };
 type MediaVideoTask = {
     task_id?: string;
@@ -38,8 +38,6 @@ type MediaVideoTask = {
 
 const VIDEO_PATH = "/v1/videos";
 const UPLOAD_PATH = "/v1/media/uploads";
-const videoModelConfigIDs = new Map<string, number>();
-
 function sameOriginHeaders(apiKey: string) {
     return apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined;
 }
@@ -78,7 +76,12 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const model = modelOptionName(selectedModel);
     if (!model) throw new Error("请先选择视频模型");
-    const modelConfigId = await resolveVideoModelConfigId(model, requestConfig.apiKey, options?.signal);
+    const modelConfig = await resolveVideoModelConfig(model, requestConfig.apiKey, options?.signal);
+    const modelConfigId = modelConfig.id;
+    validateVideoReferenceCounts(
+        { images: referenceLimit(modelConfig.max_reference_images), videos: referenceLimit(modelConfig.max_reference_videos), audios: referenceLimit(modelConfig.max_reference_audios) },
+        { images: references.length, videos: videoReferences.length, audios: audioReferences.length },
+    );
 
     try {
         const [referenceImages, referenceVideos, referenceAudios] = await Promise.all([
@@ -96,7 +99,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
                 size: normalizeSeedanceRatio(config.size),
                 resolution: normalizeSeedanceResolution(config.vquality, model),
                 generate_audio: boolConfig(config.videoGenerateAudio, true),
-                watermark: boolConfig(config.videoWatermark, false),
+                watermark: isSeedanceVideoModel(model) ? false : boolConfig(config.videoWatermark, false),
                 reference_images: referenceImages,
                 reference_videos: referenceVideos,
                 reference_audios: referenceAudios,
@@ -148,15 +151,25 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     throw new Error("视频接口没有返回可播放的视频");
 }
 
-async function resolveVideoModelConfigId(model: string, apiKey: string, signal?: AbortSignal) {
-    let id = videoModelConfigIDs.get(model);
-    if (!id) {
-        const response = await axios.get<VideoModel[]>("/v1/models", { headers: sameOriginHeaders(apiKey), params: { media_type: "video" }, signal, withCredentials: true });
-        for (const item of response.data) if (!item.media_type || item.media_type === "video") videoModelConfigIDs.set(item.model, item.id);
-        id = videoModelConfigIDs.get(model);
-    }
-    if (!id) throw new Error(`当前模型 ${model} 没有可用的媒体站视频配置`);
-    return id;
+async function resolveVideoModelConfig(model: string, apiKey: string, signal?: AbortSignal) {
+    const response = await axios.get<VideoModel[]>("/v1/models", { headers: sameOriginHeaders(apiKey), params: { media_type: "video" }, signal, withCredentials: true });
+    const config = response.data.find((item) => (!item.media_type || item.media_type === "video") && publicVideoModelName(item) === model);
+    if (!config) throw new Error(`当前模型 ${model} 没有可用的媒体站视频配置`);
+    return config;
+}
+
+function publicVideoModelName(model: VideoModel) {
+    return model.display_name?.trim() || model.model.trim();
+}
+
+export function validateVideoReferenceCounts(limits: { images: number; videos: number; audios: number }, counts: { images: number; videos: number; audios: number }) {
+    if (counts.images > limits.images) throw new Error(`当前视频模型最多支持 ${limits.images} 张参考图片`);
+    if (counts.videos > limits.videos) throw new Error(`当前视频模型最多支持 ${limits.videos} 个参考视频`);
+    if (counts.audios > limits.audios) throw new Error(`当前视频模型最多支持 ${limits.audios} 个参考音频`);
+}
+
+function referenceLimit(value: number | undefined) {
+    return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0;
 }
 
 async function uploadReference(file: File, kind: "image" | "video" | "audio", modelConfigId: number, apiKey: string, signal?: AbortSignal) {

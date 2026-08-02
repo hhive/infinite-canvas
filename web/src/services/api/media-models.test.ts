@@ -28,20 +28,23 @@ describe("fetchMediaModels", () => {
     });
 
     it("accepts video responses without a redundant media_type field", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "openai_videos_v2", price_quota: 12 }] });
-        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "openai_videos_v2", priceQuota: 12 }]);
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "seedance_content_generation", price_quota: 12, max_reference_images: 3, max_reference_videos: 1, max_reference_audios: 0 }] });
+        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "seedance_content_generation", priceQuota: 12, maxReferenceImages: 3, maxReferenceVideos: 1, maxReferenceAudios: 0 }]);
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "video" } }));
     });
 
-    it("keeps video records distinct when only their display names match", async () => {
+    it("uses distinct video display names as public model identities when the upstream model matches", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({
             data: [
-                { id: 15, media_type: "video", model: "video-fast", display_name: "Video" },
-                { id: 16, media_type: "video", model: "video-quality", display_name: "Video" },
+                { id: 15, media_type: "video", model: "seedance-2.0-mini", display_name: "seedance-2.0-mini" },
+                { id: 16, media_type: "video", model: "seedance-2.0-mini", display_name: "seedance-2.0-mini-1" },
             ],
         });
 
-        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ model: "video-fast" }, { model: "video-quality" }]);
+        await expect(fetchMediaModels("video")).resolves.toMatchObject([
+            { id: 15, model: "seedance-2.0-mini", displayName: "seedance-2.0-mini" },
+            { id: 16, model: "seedance-2.0-mini-1", displayName: "seedance-2.0-mini-1" },
+        ]);
     });
 
     it.each([

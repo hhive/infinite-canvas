@@ -1,7 +1,7 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { cancelVideoGenerationTask, createVideoGenerationTask, pollVideoGenerationTask, type VideoGenerationTask } from "@/services/api/video";
+import { cancelVideoGenerationTask, createVideoGenerationTask, pollVideoGenerationTask, validateVideoReferenceCounts, type VideoGenerationTask } from "@/services/api/video";
 import { defaultConfig } from "@/stores/use-config-store";
 
 vi.mock("axios", () => ({
@@ -31,8 +31,12 @@ afterEach(() => {
 });
 
 describe("media video task API", () => {
+    it("enforces reference counts from the selected video model", () => {
+        expect(() => validateVideoReferenceCounts({ images: 2, videos: 1, audios: 0 }, { images: 3, videos: 0, audios: 0 })).toThrow("图片")
+        expect(() => validateVideoReferenceCounts({ images: 2, videos: 1, audios: 0 }, { images: 2, videos: 1, audios: 0 })).not.toThrow()
+    });
     it("resolves the server model and creates a same-origin domain request", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "media-video-create", media_type: "video" }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "upstream-video", display_name: "media-video-create", media_type: "video" }] });
         vi.mocked(axios.post).mockResolvedValueOnce({ data: { task_id: "video-1", status: "queued", model_config_id: 7, model: "media-video-create", poll_after_ms: 1500 } });
 
         const created = await createVideoGenerationTask(config("media-video-create", "secret-key"), "ocean at dusk");
@@ -43,6 +47,20 @@ describe("media video task API", () => {
             "/v1/videos",
             expect.objectContaining({ model: "media-video-create", model_config_id: 7, prompt: "ocean at dusk", reference_images: [], reference_videos: [], reference_audios: [] }),
             expect.objectContaining({ headers: { Authorization: "Bearer secret-key" }, withCredentials: true }),
+        );
+    });
+
+    it("normalizes legacy Mini settings to the AI Proxy contract", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "seedance-2.0-mini", media_type: "video" }] });
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: { task_id: "video-1", status: "queued", model_config_id: 7, model: "seedance-2.0-mini" } });
+        const legacy = { ...config("seedance-2.0-mini"), vquality: "1080p", size: "adaptive", videoSeconds: "-1", videoWatermark: "true" };
+
+        await createVideoGenerationTask(legacy, "ocean at dusk");
+
+        expect(axios.post).toHaveBeenCalledWith(
+            "/v1/videos",
+            expect.objectContaining({ resolution: "720p", size: "16:9", seconds: 4, watermark: false }),
+            expect.anything(),
         );
     });
 
