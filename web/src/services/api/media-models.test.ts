@@ -28,8 +28,8 @@ describe("fetchMediaModels", () => {
     });
 
     it("accepts video responses without a redundant media_type field", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "seedance_content_generation", price_quota: 12, max_reference_images: 3, max_reference_videos: 1, max_reference_audios: 0 }] });
-        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "seedance_content_generation", priceQuota: 12, maxReferenceImages: 3, maxReferenceVideos: 1, maxReferenceAudios: 0 }]);
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "seedance_content_generation", price_quota: 12, max_reference_images: 3, max_reference_videos: 1, max_reference_audios: 0, supported_seconds: [15, 4, 4, 0] }] });
+        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "seedance_content_generation", priceQuota: 12, maxReferenceImages: 3, maxReferenceVideos: 1, maxReferenceAudios: 0, supportedSeconds: [4, 15] }]);
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "video" } }));
     });
 

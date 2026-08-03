@@ -23,7 +23,7 @@ export type VideoGenerationTaskState =
     | { status: "failed"; task: VideoGenerationTask; error: string };
 
 type RequestOptions = { signal?: AbortSignal; onTask?: (task: VideoGenerationTask) => void | Promise<void> };
-type VideoModel = { id: number; model: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number };
+type VideoModel = { id: number; model: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[] };
 type UploadResponse = { upload_token?: string; token?: string; id?: string | number };
 type MediaVideoTask = {
     task_id?: string;
@@ -78,6 +78,8 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     if (!model) throw new Error("请先选择视频模型");
     const modelConfig = await resolveVideoModelConfig(model, requestConfig.apiKey, options?.signal);
     const modelConfigId = modelConfig.id;
+    const seconds = normalizeSeedanceDuration(config.videoSeconds);
+    if (Array.isArray(modelConfig.supported_seconds) && !modelConfig.supported_seconds.includes(seconds)) throw new Error(`当前视频模型不支持 ${seconds} 秒`);
     validateVideoReferenceCounts(
         { images: referenceLimit(modelConfig.max_reference_images), videos: referenceLimit(modelConfig.max_reference_videos), audios: referenceLimit(modelConfig.max_reference_audios) },
         { images: references.length, videos: videoReferences.length, audios: audioReferences.length },
@@ -95,7 +97,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
                 model,
                 model_config_id: modelConfigId,
                 prompt,
-                seconds: normalizeSeedanceDuration(config.videoSeconds),
+                seconds,
                 size: normalizeSeedanceRatio(config.size),
                 resolution: normalizeSeedanceResolution(config.vquality, model),
                 generate_audio: boolConfig(config.videoGenerateAudio, true),

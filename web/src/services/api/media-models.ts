@@ -13,6 +13,7 @@ export type MediaModel = {
     maxReferenceImages?: number;
     maxReferenceVideos?: number;
     maxReferenceAudios?: number;
+    supportedSeconds?: number[];
 };
 
 function authHeaders(apiKey: string) {
@@ -62,9 +63,15 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
             maxReferenceImages: referenceLimit(item.max_reference_images),
             maxReferenceVideos: referenceLimit(item.max_reference_videos),
             maxReferenceAudios: referenceLimit(item.max_reference_audios),
+            supportedSeconds: supportedSeconds(item.supported_seconds),
         });
     }
     return models;
+}
+
+function supportedSeconds(value: unknown) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.map(Number).filter((item) => Number.isSafeInteger(item) && item > 0 && item <= 3600))].sort((a, b) => a - b);
 }
 
 function referenceLimit(value: unknown) {
