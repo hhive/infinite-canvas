@@ -12,11 +12,8 @@ import {
 } from "@/lib/seedance-video";
 
 describe("Seedance AI Proxy contract", () => {
-    it("uses the documented reference counts and upload limits", () => {
+    it("keeps only upload-size limits in the client contract", () => {
         expect(SEEDANCE_REFERENCE_LIMITS).toEqual({
-            images: 4,
-            videos: 1,
-            audios: 1,
             imageMaxBytes: 20 * 1024 * 1024,
             videoMaxBytes: 200 * 1024 * 1024,
             audioMaxBytes: 50 * 1024 * 1024,

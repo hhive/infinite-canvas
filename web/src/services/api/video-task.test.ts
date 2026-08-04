@@ -31,9 +31,12 @@ afterEach(() => {
 });
 
 describe("media video task API", () => {
-    it("enforces reference counts from the selected video model", () => {
-        expect(() => validateVideoReferenceCounts({ images: 2, videos: 1, audios: 0 }, { images: 3, videos: 0, audios: 0 })).toThrow("图片")
-        expect(() => validateVideoReferenceCounts({ images: 2, videos: 1, audios: 0 }, { images: 2, videos: 1, audios: 0 })).not.toThrow()
+    it("enforces each configured reference count without protocol-specific caps", () => {
+        const limits = { images: 4, videos: 3, audios: 1 };
+        expect(() => validateVideoReferenceCounts(limits, limits)).not.toThrow();
+        expect(() => validateVideoReferenceCounts(limits, { ...limits, images: 5 })).toThrow("图片");
+        expect(() => validateVideoReferenceCounts(limits, { ...limits, videos: 4 })).toThrow("视频");
+        expect(() => validateVideoReferenceCounts(limits, { ...limits, audios: 2 })).toThrow("音频");
     });
     it("resolves the server model and creates a same-origin domain request", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "upstream-video", display_name: "media-video-create", media_type: "video" }] });

@@ -103,9 +103,9 @@ export default function VideoPage() {
     const model = effectiveConfig.videoModel;
     const selectedModel = videoModels.find((item) => item.model === modelOptionName(model));
     const referenceLimits = {
-        images: selectedModel?.maxReferenceImages ?? SEEDANCE_REFERENCE_LIMITS.images,
-        videos: selectedModel?.maxReferenceVideos ?? SEEDANCE_REFERENCE_LIMITS.videos,
-        audios: selectedModel?.maxReferenceAudios ?? SEEDANCE_REFERENCE_LIMITS.audios,
+        images: selectedModel?.maxReferenceImages ?? 0,
+        videos: selectedModel?.maxReferenceVideos ?? 0,
+        audios: selectedModel?.maxReferenceAudios ?? 0,
     };
     const canGenerate = Boolean(prompt.trim());
 
