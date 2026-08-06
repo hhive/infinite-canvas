@@ -20,6 +20,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const setMediaModelsLoading = useConfigStore((state) => state.setMediaModelsLoading);
 
     useEffect(() => {
+        if (!shouldInitializeClientRoot(window.location.pathname)) return;
         if (handledConfigParams.current) return;
         const { apiKey, sub2apiLaunch, cleanUrl } = readImageLaunchParams(window.location);
         handledConfigParams.current = true;
@@ -77,4 +78,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, [applyMediaModels, clearAPIKeys, config.channels, message, openConfigDialog, setMediaModelsError, setMediaModelsLoading, updateConfig]);
 
     return <>{children}</>;
+}
+
+export function shouldInitializeClientRoot(pathname: string): boolean {
+    return pathname !== "/models";
 }
