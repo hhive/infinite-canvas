@@ -1,6 +1,6 @@
 import axios from "axios";
 
-export type MarketplaceCall = { method: string; path: string; example: string; auth: string };
+export type MarketplaceCall = { label: string; method: string; path: string; example: string; auth: string };
 export type MarketplaceModel = {
     media_type: "image" | "video";
     name: string;
@@ -18,7 +18,7 @@ export type MarketplaceModel = {
     max_reference_videos?: number;
     max_reference_audios?: number;
     supported_seconds?: number[];
-    api: MarketplaceCall;
+    calls: MarketplaceCall[];
 };
 export type MarketplaceGroup = { id: number; name: string; models: MarketplaceModel[] };
 export type MarketplaceResponse = { enabled: boolean; fields: string[]; groups: MarketplaceGroup[] };
