@@ -1,7 +1,7 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchModelCatalog } from "@/services/api/model-catalog";
+import { fetchModelCatalog, imagePricingRows } from "@/services/api/model-catalog";
 
 vi.mock("axios", () => ({ default: { get: vi.fn() } }));
 
@@ -14,5 +14,15 @@ describe("fetchModelCatalog", () => {
         expect(catalog.groups[0].models[0].calls).toHaveLength(2);
         expect(catalog.groups[0].models[0].calls[1].path).toBe("/v1/images/tasks/{task_id}");
         expect(axios.get).toHaveBeenCalledWith("/api/models/catalog", { signal: undefined });
+    });
+});
+
+describe("imagePricingRows", () => {
+    it("returns only supported size and quality tiers", () => {
+        expect(imagePricingRows({ media_type: "image", name: "gpt-image-2", sizes: ["1k", "2k", "4k"], qualities: ["low", "medium", "high"], price_1k: 0.03, price_2k: 0.07, price_4k: 0.1, price_low: 0.03, price_medium: 0.07, price_high: 0.1, calls: [] })).toEqual([
+            { label: "1K", price: 0.03 }, { label: "2K", price: 0.07 }, { label: "4K", price: 0.1 },
+            { label: "低", price: 0.03 }, { label: "中", price: 0.07 }, { label: "高", price: 0.1 },
+        ]);
+        expect(imagePricingRows({ media_type: "image", name: "gpt-image-2", sizes: ["1k"], qualities: ["low"], price_1k: 0.03, price_2k: 0.07, price_4k: 0.1, price_low: 0.03, price_medium: 0.07, price_high: 0.1, calls: [] })).toEqual([{ label: "1K", price: 0.03 }, { label: "低", price: 0.03 }]);
     });
 });
