@@ -7,12 +7,15 @@
         <link rel="icon" href="/logo.svg" />
         <title>无限画布</title>
         <script>
+            var t = "light";
             try {
                 var s = JSON.parse(localStorage.getItem("infinite-canvas:theme_store") || "{}");
-                var t = s.state && s.state.theme === "light" ? "light" : "dark";
-                document.documentElement.classList.toggle("dark", t === "dark");
-                document.documentElement.style.colorScheme = t;
-            } catch (e) {}
+                t = s.state && s.state.theme === "dark" ? "dark" : "light";
+            } catch (e) {
+                localStorage.setItem("infinite-canvas:theme_store", JSON.stringify({ state: { theme: "light" }, version: 0 }));
+            }
+            document.documentElement.classList.toggle("dark", t === "dark");
+            document.documentElement.style.colorScheme = t;
         </script>
     </head>
     <body class="bg-background text-foreground antialiased">
