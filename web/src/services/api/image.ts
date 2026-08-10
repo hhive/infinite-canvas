@@ -3,7 +3,7 @@ import axios from "axios";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
-import { imageToDataUrl } from "@/services/image-storage";
+import { dataUrlToBlob, imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 
 export type AiTextMessage = {
@@ -98,7 +98,9 @@ export type ImageTask = {
 
 const imageModelAvailability = new Set<string>();
 const preparedImageEditReferenceDataUrls = new WeakMap<ReferenceImage[], string[]>();
+const preparedImageEditReferenceBlobs = new WeakMap<ReferenceImage[], Blob[]>();
 const IMAGE_ASYNC_PATH = "/v1/images/generations/async";
+const IMAGE_EDIT_ASYNC_PATH = "/v1/images/edits/async";
 const IMAGE_TASK_PATH = "/v1/images/tasks";
 
 function sameOriginHeaders(apiKey: string) {
@@ -749,6 +751,15 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
 }
 
+async function submitImageEditTask(config: AiConfig, fields: Record<string, string>, inputImages: Blob[], mask: Blob | undefined, options?: ImageTaskRequestOptions) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) form.append(key, value);
+    inputImages.forEach((image, index) => form.append("image[]", image, `input-${index + 1}.${image.type === "image/jpeg" ? "jpg" : image.type === "image/webp" ? "webp" : "png"}`));
+    if (mask) form.append("mask", mask, `mask.${mask.type === "image/jpeg" ? "jpg" : mask.type === "image/webp" ? "webp" : "png"}`);
+    const response = await axios.post<ImageTask>(IMAGE_EDIT_ASYNC_PATH, form, { headers: sameOriginHeaders(config.apiKey), signal: options?.signal, withCredentials: true });
+    return response.data;
+}
+
 export async function prepareImageEditReferences(references: ReferenceImage[]) {
     const dataUrls: string[] = [];
     for (const [index, reference] of references.entries()) {
@@ -768,6 +779,7 @@ export async function prepareImageEditReferences(references: ReferenceImage[]) {
         storageKey: undefined,
     }));
     preparedImageEditReferenceDataUrls.set(prepared, dataUrls);
+    preparedImageEditReferenceBlobs.set(prepared, dataUrls.map(dataUrlToBlob));
     return prepared;
 }
 
@@ -780,21 +792,22 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     try {
         await ensureImageModelAvailable(requestConfig.model, requestConfig);
         const model = modelOptionName(requestConfig.model);
-        const inputImages = preparedImageEditReferenceDataUrls.get(references) || (await Promise.all(references.map((image) => imageToDataUrl(image))));
-        const maskImage = mask ? await imageToDataUrl(mask) : undefined;
-        const task = await submitImageTask(
+        const inputDataUrls = preparedImageEditReferenceDataUrls.get(references) || (await Promise.all(references.map((image) => imageToDataUrl(image))));
+        const inputImages = preparedImageEditReferenceBlobs.get(references) || inputDataUrls.map(dataUrlToBlob);
+        const maskImage = mask ? dataUrlToBlob(await imageToDataUrl(mask)) : undefined;
+        const task = await submitImageEditTask(
             requestConfig,
             {
                 model,
                 model_display_name: model,
                 prompt: withSystemPrompt(requestConfig, requestPrompt),
-                n,
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
                 output_format: IMAGE_OUTPUT_FORMAT,
-                images: inputImages.map((image_url) => ({ image_url })),
-                ...(maskImage ? { mask: { image_url: maskImage } } : {}),
+                n: String(n),
             },
+            inputImages,
+            maskImage,
             options,
         );
         return await waitForImageTask(task, requestConfig.apiKey, options);

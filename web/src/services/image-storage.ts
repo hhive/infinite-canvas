@@ -152,7 +152,7 @@ function blobToDataUrl(blob: Blob) {
     });
 }
 
-function dataUrlToBlob(dataUrl: string) {
+export function dataUrlToBlob(dataUrl: string) {
     const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(dataUrl);
     if (!match) throw new InvalidImageFormatError();
     try {

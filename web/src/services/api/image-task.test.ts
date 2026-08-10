@@ -116,16 +116,12 @@ describe("image edit task payload", () => {
         await expect(requestEdit(config, "edit", [reference], mask)).resolves.toHaveLength(1);
 
         expect(axios.post).toHaveBeenCalledTimes(1);
-        expect(axios.post).toHaveBeenCalledWith(
-            "/v1/images/generations/async",
-            expect.objectContaining({
-                model: "gpt-image-2",
-                model_display_name: "gpt-image-2",
-                images: [{ image_url: reference.dataUrl }],
-                mask: { image_url: mask.dataUrl },
-            }),
-            expect.objectContaining({ headers: { Authorization: "Bearer sk-test" } }),
-        );
+        expect(axios.post).toHaveBeenCalledWith("/v1/images/edits/async", expect.any(FormData), expect.objectContaining({ headers: { Authorization: "Bearer sk-test" } }));
+        const form = vi.mocked(axios.post).mock.calls[0]?.[1] as FormData;
+        expect(form.get("model")).toBe("gpt-image-2");
+        expect(form.get("prompt")).toContain("edit");
+        expect(form.getAll("image[]")).toHaveLength(1);
+        expect(form.get("mask")).toBeInstanceOf(Blob);
     });
 
     it("normalizes declared MIME conflicts by signature before the async task POST", async () => {
@@ -151,9 +147,12 @@ describe("image edit task payload", () => {
 
         await expect(requestEdit(imageRequestConfig(model), "edit", references, mask)).resolves.toHaveLength(1);
 
-        const requestBody = vi.mocked(axios.post).mock.calls[0]?.[1] as { images: Array<{ image_url: string }>; mask: { image_url: string } };
-        expect(requestBody.images).toEqual([{ image_url: dataUrl("image/png", PNG_BYTES) }, { image_url: dataUrl("image/jpeg", JPEG_BYTES) }, { image_url: dataUrl("image/webp", WEBP_BYTES) }]);
-        expect(requestBody.mask).toEqual({ image_url: dataUrl("image/png", PNG_BYTES) });
+        const requestBody = vi.mocked(axios.post).mock.calls[0]?.[1] as FormData;
+        expect(requestBody.getAll("image[]")).toHaveLength(3);
+        expect((requestBody.getAll("image[]")[0] as Blob).type).toBe("image/png");
+        expect((requestBody.getAll("image[]")[1] as Blob).type).toBe("image/jpeg");
+        expect((requestBody.getAll("image[]")[2] as Blob).type).toBe("image/webp");
+        expect((requestBody.get("mask") as Blob).type).toBe("image/png");
     });
 
     it("rejects an unsupported signature before posting an async image task", async () => {
@@ -186,7 +185,7 @@ describe("image edit task payload", () => {
 
             expect(prepared).not.toBe(references);
             expect(prepared.map((item) => item.dataUrl)).toEqual([dataUrl("image/png", PNG_BYTES), dataUrl("image/webp", WEBP_BYTES)]);
-            expect(atobCallsAfterPrepare).toBe(2);
+            expect(atobCallsAfterPrepare).toBe(4);
             expect(sliceCallsAfterPrepare).toBe(2);
 
             const model = "gpt-image-prepared-references";
