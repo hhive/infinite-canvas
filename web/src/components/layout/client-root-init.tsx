@@ -1,14 +1,17 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import { App } from "antd";
+import { useTranslation } from "react-i18next";
 
 import { createModelChannel, modelOptionsFromChannels, useConfigStore } from "@/stores/use-config-store";
 import { fetchChannelModels, probeImageSession } from "@/services/api/image";
 import { fetchMediaModels, type MediaCapability } from "@/services/api/media-models";
 import { readImageLaunchParams, resolveImageLaunchAuthentication } from "@/lib/image-launch-params";
+import { usePromptSourceScheduler } from "@/hooks/use-prompt-source-scheduler";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const { message } = App.useApp();
+    const { t } = useTranslation();
     const handledConfigParams = useRef(false);
     const mediaRequest = useRef(0);
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -18,6 +21,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const applyMediaModels = useConfigStore((state) => state.applyMediaModels);
     const setMediaModelsError = useConfigStore((state) => state.setMediaModelsError);
     const setMediaModelsLoading = useConfigStore((state) => state.setMediaModelsLoading);
+
+    usePromptSourceScheduler();
 
     useEffect(() => {
         if (!shouldInitializeClientRoot(window.location.pathname)) return;
@@ -40,10 +45,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                             }
                           : channel,
                   )
-                : [createModelChannel({ id: "default", name: "默认渠道", apiKey: authenticationKey })],
+                : [createModelChannel({ id: "default", name: t("config.channels.defaultName"), apiKey: authenticationKey })],
         );
         if (apiKey && !sub2apiLaunch) updateConfig("apiKey", apiKey);
-        const channel = { ...(firstChannel || createModelChannel({ id: "default", name: "默认渠道" })), apiKey: authenticationKey };
+        const channel = { ...(firstChannel || createModelChannel({ id: "default", name: t("config.channels.defaultName") })), apiKey: authenticationKey };
         void probeImageSession(authenticationKey)
             .then((ready) => {
                 if (!ready) {
@@ -57,7 +62,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 const channels = [{ ...channel, models }, ...config.channels.slice(1)];
                 updateConfig("channels", channels);
                 updateConfig("models", modelOptionsFromChannels(channels));
-                if (apiKey) message.success("已导入 API Key");
+                if (apiKey) message.success(t("config.importedDirectConfig"));
             })
             .catch((error) => {
                 message.error(error instanceof Error ? error.message : "读取模型失败");
@@ -75,7 +80,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     setMediaModelsError(capability, error instanceof Error ? error.message : "读取媒体模型失败", status === 401);
                 });
         }
-    }, [applyMediaModels, clearAPIKeys, config.channels, message, openConfigDialog, setMediaModelsError, setMediaModelsLoading, updateConfig]);
+    }, [applyMediaModels, clearAPIKeys, config.channels, message, openConfigDialog, setMediaModelsError, setMediaModelsLoading, t, updateConfig]);
 
     return <>{children}</>;
 }

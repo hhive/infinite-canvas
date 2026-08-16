@@ -1,10 +1,12 @@
 import axios from "axios";
+import { nanoid } from "nanoid";
 
 import { dataUrlToFile } from "@/lib/image-utils";
-import { normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/lib/seedance-video";
+import { boolConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/lib/seedance-video";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
-import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
+import { runModelPlugin } from "@/services/api/model-plugin";
+import { modelOptionName, resolveModelChannel, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -16,6 +18,7 @@ export type VideoGenerationTask = {
     model: string;
     status: VideoTaskStatus;
     pollAfterMs?: number;
+    provider?: "media" | "plugin";
 };
 export type VideoGenerationTaskState =
     | { status: "pending"; task: VideoGenerationTask }
@@ -38,12 +41,19 @@ type MediaVideoTask = {
 
 const VIDEO_PATH = "/v1/videos";
 const UPLOAD_PATH = "/v1/media/uploads";
+export const GENERATED_VIDEO_LOCAL_STORE_TIMEOUT_MS = 8000;
+const pluginVideoResults = new Map<string, VideoGenerationResult>();
 function sameOriginHeaders(apiKey: string) {
     return apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined;
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
     let task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
+    if (task.provider === "plugin") {
+        const state = await pollVideoGenerationTask(config, task, options);
+        if (state.status === "completed") return state.result;
+        throw new Error(state.status === "failed" ? state.error : "插件视频尚未完成");
+    }
     await options?.onTask?.(task);
     for (let attempt = 0; attempt < 120; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("本地轮询已停止", "AbortError");
@@ -74,6 +84,11 @@ export async function resumeVideoGenerationTask(config: AiConfig, task: VideoGen
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
+    const script = resolveModelScript(config, selectedModel);
+    if (script) {
+        const channel = resolveModelChannel(config, selectedModel);
+        return createPluginVideoTask({ ...requestConfig, baseUrl: channel.baseUrl }, selectedModel, script, prompt, references, options);
+    }
     const model = modelOptionName(selectedModel);
     if (!model) throw new Error("请先选择视频模型");
     const modelConfig = await resolveVideoModelConfig(model, requestConfig.apiKey, options?.signal);
@@ -118,6 +133,12 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
 }
 
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {
+    if (task.provider === "plugin") {
+        const result = pluginVideoResults.get(task.id);
+        return result
+            ? { status: "completed", task: { ...task, status: "completed" }, result }
+            : { status: "failed", task: { ...task, status: "expired" }, error: "插件视频结果已失效，请重新生成" };
+    }
     const requestConfig = resolveModelRequestConfig(config, task.model);
     try {
         const response = await axios.get<MediaVideoTask>(`${VIDEO_PATH}/${encodeURIComponent(task.id)}`, { headers: sameOriginHeaders(requestConfig.apiKey), signal: options?.signal, withCredentials: true });
@@ -149,12 +170,63 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     if (result.blob) return uploadMediaFile(result.blob, "video");
     if (result.url) {
         try {
-            return await uploadMediaFile(result.url, "video");
+            return await settleWithin(uploadMediaFile(result.url, "video"), GENERATED_VIDEO_LOCAL_STORE_TIMEOUT_MS);
         } catch {
             return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
         }
     }
     throw new Error("视频接口没有返回可播放的视频");
+}
+
+async function createPluginVideoTask(config: AiConfig, model: string, script: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    if (!config.baseUrl.trim()) throw new Error("请先配置 API 地址");
+    if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
+    const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
+    const result = videoPluginResult(await runModelPlugin({
+        capability: "video",
+        script,
+        config,
+        prompt,
+        images,
+        params: {
+            seconds: normalizeSeedanceDuration(config.videoSeconds),
+            size: normalizeSeedanceRatio(config.size),
+            resolution: normalizeSeedanceResolution(config.vquality, modelOptionName(model)),
+            ratio: config.size,
+            generateAudio: boolConfig(config.videoGenerateAudio, true),
+            watermark: boolConfig(config.videoWatermark, false),
+        },
+        signal: options?.signal,
+    }));
+    const id = nanoid();
+    pluginVideoResults.set(id, result);
+    return { id, modelConfigId: 0, model, status: "completed", provider: "plugin" };
+}
+
+function videoPluginResult(result: unknown): VideoGenerationResult {
+    if (result instanceof Blob) return { blob: result, mimeType: result.type || "video/mp4" };
+    if (typeof result === "string" && result) return { url: result, mimeType: "video/mp4" };
+    if (result && typeof result === "object") {
+        const record = result as Record<string, unknown>;
+        if (record.blob instanceof Blob) return { blob: record.blob, mimeType: record.blob.type || "video/mp4" };
+        const url = [record.url, record.video_url, record.result_url].find((value) => typeof value === "string" && value) as string | undefined;
+        if (url) return { url, mimeType: "video/mp4" };
+    }
+    throw new Error("模型脚本没有返回视频");
+}
+
+async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    let timer = 0;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<T>((_resolve, reject) => {
+                timer = window.setTimeout(() => reject(new Error("本地视频保存超时")), timeoutMs);
+            }),
+        ]);
+    } finally {
+        window.clearTimeout(timer);
+    }
 }
 
 async function resolveVideoModelConfig(model: string, apiKey: string, signal?: AbortSignal) {

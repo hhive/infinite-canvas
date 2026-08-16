@@ -1,9 +1,10 @@
 import axios from "axios";
 
-import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildApiUrl, modelOptionName, resolveModelChannel, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { dataUrlToBlob, imageToDataUrl } from "@/services/image-storage";
+import { normalizePluginImages, runModelPlugin } from "./model-plugin";
 import type { ReferenceImage } from "@/types/image";
 
 export type AiTextMessage = {
@@ -203,6 +204,10 @@ function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
     const normalized = QUALITY_ALIASES[value] || value;
     return QUALITY_BASE[normalized] ? normalized : undefined;
+}
+
+function normalizeBackground(background: string | undefined) {
+    return background?.trim().toLowerCase() === "transparent" ? "transparent" : undefined;
 }
 
 /** Map "quality + ratio" to an explicit pixel dimension like "3840x2160". */
@@ -725,10 +730,29 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: ImageTaskRequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const selectedModel = config.model || config.imageModel;
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
+    const script = resolveModelScript(config, selectedModel);
+    if (script) {
+        const channel = resolveModelChannel(config, selectedModel);
+        try {
+            const result = await runModelPlugin({
+                capability: "image",
+                script,
+                config: { ...requestConfig, baseUrl: channel.baseUrl },
+                prompt: withSystemPrompt(requestConfig, prompt),
+                images: [],
+                params: { size: requestSize, quality, count: n, ...(normalizeBackground(config.background) ? { background: normalizeBackground(config.background) } : {}) },
+                signal: options?.signal,
+            });
+            return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
+        } catch (error) {
+            throw new Error(readAxiosError(error, "请求失败"));
+        }
+    }
     try {
         await ensureImageModelAvailable(requestConfig.model, requestConfig);
         const model = modelOptionName(requestConfig.model);
@@ -784,11 +808,31 @@ export async function prepareImageEditReferences(references: ReferenceImage[]) {
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: ImageTaskRequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const selectedModel = config.model || config.imageModel;
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
+    const script = resolveModelScript(config, selectedModel);
+    if (script) {
+        const channel = resolveModelChannel(config, selectedModel);
+        try {
+            const images = await Promise.all(references.map((image) => imageToDataUrl(image)));
+            const result = await runModelPlugin({
+                capability: "image",
+                script,
+                config: { ...requestConfig, baseUrl: channel.baseUrl },
+                prompt: withSystemPrompt(requestConfig, requestPrompt),
+                images,
+                params: { size: requestSize, quality, count: n, ...(normalizeBackground(config.background) ? { background: normalizeBackground(config.background) } : {}) },
+                signal: options?.signal,
+            });
+            return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
+        } catch (error) {
+            throw new Error(readAxiosError(error, "请求失败"));
+        }
+    }
     try {
         await ensureImageModelAvailable(requestConfig.model, requestConfig);
         const model = modelOptionName(requestConfig.model);
@@ -817,8 +861,16 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
+    const selectedModel = config.model || config.textModel;
+    const requestConfig = resolveModelRequestConfig(config, selectedModel);
+    const script = resolveModelScript(config, selectedModel);
     try {
+        if (script) {
+            const channel = resolveModelChannel(config, selectedModel);
+            const answer = await runModelPlugin<string>({ capability: "text", script, config: { ...requestConfig, baseUrl: channel.baseUrl }, messages: withSystemMessage(requestConfig, messages), signal: options?.signal, onDelta });
+            if (answer) onDelta(answer);
+            return answer || "没有返回内容";
+        }
         if (requestConfig.apiFormat === "gemini") {
             const answer = (await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages), onDelta, options)).content || "没有返回内容";
             if (answer === "没有返回内容") onDelta(answer);

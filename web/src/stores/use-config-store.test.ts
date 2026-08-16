@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { MediaModel } from "@/services/api/media-models";
-import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
+import { defaultConfig, resolveModelForCapability, useConfigStore } from "@/stores/use-config-store";
 
 beforeEach(() => {
     useConfigStore.setState({
@@ -28,6 +28,18 @@ describe("config authentication cleanup", () => {
         const config = useConfigStore.getState().config;
         expect(config.apiKey).toBe("");
         expect(config.channels.every((channel) => channel.apiKey === "")).toBe(true);
+    });
+});
+
+describe("configured model capabilities", () => {
+    it("honors an explicit video capability for a model name without video keywords", () => {
+        const config = {
+            ...defaultConfig,
+            channels: [{ ...defaultConfig.channels[0], models: [{ name: "custom-alpha", capability: "video" as const }] }],
+            videoModel: "default::custom-alpha",
+        };
+
+        expect(resolveModelForCapability(config, "default::custom-alpha", "video")).toBe("default::custom-alpha");
     });
 });
 

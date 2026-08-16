@@ -2,7 +2,8 @@ import { act, createElement, type ComponentProps, type ReactElement, type ReactN
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CanvasTopBar, hasActiveCanvasMediaTask } from "@/pages/canvas/project";
+import { buildPluginBuiltinPrompt, CanvasTopBar, hasActiveCanvasMediaTask } from "@/pages/canvas/project";
+import { resolveCanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -14,13 +15,15 @@ vi.mock("antd", () => ({
     Button: ({ children, icon, ...props }: ComponentProps<"button"> & { icon?: ReactNode }) => createElement("button", props, icon, children),
     Dropdown: ({ children }: { children: ReactElement }) => children,
     Modal: ({ children, open }: { children: ReactNode; open?: boolean }) => (open ? createElement("div", null, children) : null),
+    Tooltip: ({ children }: { children: ReactNode }) => children,
 }));
 
 vi.mock("@/components/layout/user-status-actions", () => ({
-    UserStatusActions: () =>
+    UserStatusActions: ({ onOpenPlugins }: { onOpenPlugins?: () => void }) =>
         createElement("div", { className: "user-status-actions" },
             createElement("button", { type: "button", "aria-label": "配置" }, "配置"),
             createElement("button", { type: "button", "aria-label": "账户操作" }, "账户"),
+            createElement("button", { type: "button", "aria-label": "节点插件", onClick: onOpenPlugins }, "节点插件"),
         ),
 }));
 
@@ -53,7 +56,9 @@ function renderTopBar(overrides: Partial<ComponentProps<typeof CanvasTopBar>> = 
         onProjects: vi.fn(),
         onCreateProject: vi.fn(),
         onDeleteProject: vi.fn(),
+        onExportProject: vi.fn(),
         onImportImage: vi.fn(),
+        onOpenPlugins: vi.fn(),
         onUndo: vi.fn(),
         onRedo: vi.fn(),
         agentOpen: false,
@@ -95,12 +100,14 @@ describe("CanvasTopBar", () => {
         button("打开画布菜单");
         button("配置");
         button("账户操作");
+        act(() => button("节点插件").click());
 
         act(() => button("Codex 未连接").click());
         act(() => button("Agent").click());
         act(() => titleButton.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
         expect(props.onToggleAgent).toHaveBeenCalledTimes(2);
         expect(props.onStartTitleEditing).toHaveBeenCalledOnce();
+        expect(props.onOpenPlugins).toHaveBeenCalledOnce();
     });
 
     it("preserves the desktop control order", () => {
@@ -110,6 +117,7 @@ describe("CanvasTopBar", () => {
             button("Codex 未连接"),
             button("配置"),
             button("账户操作"),
+            button("节点插件"),
             button("Agent"),
         ];
 
@@ -126,5 +134,16 @@ describe("hasActiveCanvasMediaTask", () => {
 
         expect(hasActiveCanvasMediaTask(recovering, null)).toBe(true);
         expect(hasActiveCanvasMediaTask(stored, null)).toBe(false);
+    });
+});
+
+describe("plugin built-in generation panel", () => {
+    it("uses the plugin-declared mode for a custom node type", () => {
+        expect(resolveCanvasNodeGenerationMode("plugin.custom-video", "video")).toBe("video");
+        expect(resolveCanvasNodeGenerationMode("plugin.custom-text", "text")).toBe("text");
+    });
+
+    it("prepends the plugin prompt contract before generation", () => {
+        expect(buildPluginBuiltinPrompt("PANORAMA:", "night harbor")).toBe("PANORAMA:night harbor");
     });
 });

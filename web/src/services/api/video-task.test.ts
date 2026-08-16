@@ -1,8 +1,13 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createVideoGenerationTask, pollVideoGenerationTask, validateVideoReferenceCounts, type VideoGenerationTask } from "@/services/api/video";
-import { defaultConfig } from "@/stores/use-config-store";
+const { runModelPlugin, uploadMediaFile } = vi.hoisted(() => ({ runModelPlugin: vi.fn(), uploadMediaFile: vi.fn() }));
+
+vi.mock("@/services/api/model-plugin", () => ({ runModelPlugin }));
+vi.mock("@/services/file-storage", () => ({ getMediaBlob: vi.fn(), uploadMediaFile }));
+
+import { GENERATED_VIDEO_LOCAL_STORE_TIMEOUT_MS, createVideoGenerationTask, pollVideoGenerationTask, requestVideoGeneration, storeGeneratedVideo, validateVideoReferenceCounts, type VideoGenerationTask } from "@/services/api/video";
+import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
 
 vi.mock("axios", () => ({
     default: {
@@ -14,7 +19,7 @@ vi.mock("axios", () => ({
     },
 }));
 
-function config(model: string, apiKey = "") {
+function config(model: string, apiKey = ""): AiConfig {
     return {
         ...defaultConfig,
         apiKey,
@@ -27,10 +32,49 @@ function config(model: string, apiKey = "") {
 const task: VideoGenerationTask = { id: "video-1", modelConfigId: 7, model: "media-video-test", status: "running", pollAfterMs: 1200 };
 
 afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
 });
 
 describe("media video task API", () => {
+    it("runs a scripted video model without creating or persisting a Media task", async () => {
+        runModelPlugin.mockResolvedValueOnce({ video_url: "https://plugin.example.test/result.mp4" });
+        const scripted = config("scripted-video", "plugin-key");
+        scripted.channels = scripted.channels.map((channel) => ({
+            ...channel,
+            baseUrl: "https://plugin.example.test/v1",
+            models: [{ name: "scripted-video", capability: "video" as const, script: "return { video_url: 'https://plugin.example.test/result.mp4' };" }],
+        }));
+        const onTask = vi.fn();
+
+        await expect(requestVideoGeneration(scripted, "ocean at dusk", [], [], [], { onTask })).resolves.toEqual({
+            url: "https://plugin.example.test/result.mp4",
+            mimeType: "video/mp4",
+        });
+
+        expect(runModelPlugin).toHaveBeenCalledWith(expect.objectContaining({ capability: "video", prompt: "ocean at dusk" }));
+        expect(axios.get).not.toHaveBeenCalled();
+        expect(axios.post).not.toHaveBeenCalled();
+        expect(onTask).not.toHaveBeenCalled();
+    });
+
+    it("keeps the locally stored result when persistence settles before the deadline", async () => {
+        const local = { url: "blob:local-video", storageKey: "video:stored", bytes: 5, mimeType: "video/mp4", width: 1280, height: 720 };
+        uploadMediaFile.mockResolvedValueOnce(local);
+
+        await expect(storeGeneratedVideo({ url: "https://media.example.test/v1/media/result.mp4" })).resolves.toBe(local);
+    });
+
+    it("falls back to the backend-owned URL when local persistence never settles", async () => {
+        vi.useFakeTimers();
+        uploadMediaFile.mockImplementationOnce(() => new Promise(() => undefined));
+
+        const stored = storeGeneratedVideo({ url: "https://media.example.test/v1/media/result.mp4", mimeType: "video/mp4" });
+        await vi.advanceTimersByTimeAsync(GENERATED_VIDEO_LOCAL_STORE_TIMEOUT_MS);
+
+        await expect(stored).resolves.toEqual({ url: "https://media.example.test/v1/media/result.mp4", storageKey: "", bytes: 0, mimeType: "video/mp4" });
+    });
+
     it("enforces each configured reference count without protocol-specific caps", () => {
         const limits = { images: 4, videos: 3, audios: 1 };
         expect(() => validateVideoReferenceCounts(limits, limits)).not.toThrow();

@@ -1,8 +1,14 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const { runModelPlugin } = vi.hoisted(() => ({ runModelPlugin: vi.fn() }));
+vi.mock("@/services/api/model-plugin", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/services/api/model-plugin")>()),
+    runModelPlugin,
+}));
+
 import { cancelImageTask, fetchChannelModels, fetchImageModels, probeImageSession, requestEdit, requestGeneration, waitForImageTask, type ImageTask } from "@/services/api/image";
-import { defaultConfig } from "@/stores/use-config-store";
+import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 
 vi.mock("axios", () => ({
@@ -20,7 +26,7 @@ function dataUrl(mimeType: string, bytes: Uint8Array) {
     return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
-function imageRequestConfig(model: string) {
+function imageRequestConfig(model: string): AiConfig {
     return {
         ...defaultConfig,
         apiKey: "sk-test",
@@ -41,6 +47,24 @@ function openAIModelList(...ids: string[]) {
 }
 
 afterEach(() => vi.clearAllMocks());
+
+describe("scripted image model", () => {
+    it("uses the configured plugin script without submitting a Media image task", async () => {
+        runModelPlugin.mockResolvedValueOnce(["data:image/png;base64,aW1hZ2U="]);
+        const scripted = imageRequestConfig("scripted-image");
+        scripted.channels = scripted.channels.map((channel) => ({
+            ...channel,
+            baseUrl: "https://plugin.example.test/v1",
+            models: [{ name: "scripted-image", capability: "image" as const, script: "return ['data:image/png;base64,aW1hZ2U='];" }],
+        }));
+
+        await expect(requestGeneration(scripted, "draw a harbor")).resolves.toMatchObject([{ dataUrl: "data:image/png;base64,aW1hZ2U=" }]);
+
+        expect(runModelPlugin).toHaveBeenCalledWith(expect.objectContaining({ capability: "image", prompt: "draw a harbor" }));
+        expect(axios.get).not.toHaveBeenCalled();
+        expect(axios.post).not.toHaveBeenCalled();
+    });
+});
 
 describe("image task cancellation boundaries", () => {
     it("explicit cancellation calls the server cancel endpoint", async () => {

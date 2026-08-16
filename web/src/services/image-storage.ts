@@ -1,6 +1,7 @@
 import localforage from "localforage";
 
 import { nanoid } from "nanoid";
+import i18n from "@/i18n";
 import { readImageMeta } from "@/lib/image-utils";
 
 export type UploadedImage = {
@@ -31,6 +32,8 @@ export function isInvalidImageFormatError(error: unknown): error is InvalidImage
 }
 
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
+const imageLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "image_generation_logs" });
+const videoLogStore = localforage.createInstance({ name: "infinite-canvas", storeName: "video_generation_logs" });
 const objectUrls = new Map<string, string>();
 
 const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
@@ -129,6 +132,14 @@ export async function deleteStoredImages(keys: Iterable<string>) {
 
 export async function cleanupUnusedImages(usedData: unknown) {
     const usedKeys = collectImageStorageKeys(usedData);
+    await Promise.all([
+        imageLogStore.iterate((value) => {
+            collectImageStorageKeys(value, usedKeys);
+        }),
+        videoLogStore.iterate((value) => {
+            collectImageStorageKeys(value, usedKeys);
+        }),
+    ]);
     const unused: string[] = [];
     await store.iterate((_value, key) => {
         if (!usedKeys.has(key)) unused.push(key);
@@ -147,7 +158,7 @@ function blobToDataUrl(blob: Blob) {
     return new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(new Error("读取图片失败"));
+        reader.onerror = () => reject(new Error(i18n.t("common.imageReadFailed")));
         reader.readAsDataURL(blob);
     });
 }
