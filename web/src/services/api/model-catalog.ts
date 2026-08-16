@@ -6,6 +6,7 @@ export type MarketplaceModel = {
     name: string;
     model_name?: string;
     display_name?: string;
+    note?: string;
     provider?: string;
     sizes?: string[];
     qualities?: string[];
