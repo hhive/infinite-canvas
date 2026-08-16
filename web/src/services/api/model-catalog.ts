@@ -21,6 +21,10 @@ export type MarketplaceModel = {
     max_reference_videos?: number;
     max_reference_audios?: number;
     supported_seconds?: number[];
+    supported_resolutions?: string[];
+    supported_sizes?: string[];
+    supports_face?: boolean;
+    charge_mode?: "per_request" | "per_second";
     calls: MarketplaceCall[];
 };
 export type MarketplaceGroup = { id: number; name: string; models: MarketplaceModel[] };

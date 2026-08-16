@@ -41,7 +41,7 @@ let root: Root;
 beforeEach(async () => {
     fetchModelCatalog.mockResolvedValue({
         enabled: true,
-        fields: [],
+        fields: ["provider", "sizes", "qualities", "prices", "video_capabilities"],
         groups: [
             {
                 id: 1,
@@ -54,6 +54,12 @@ beforeEach(async () => {
                         display_name: "完整显示名称",
                         note: "这是需要完整换行展示的公开模型备注，不应该被截断。",
                         calls: [{ label: "同步生成", method: "POST", path: "/v1/images/generations", example: longCallExample, auth: "Bearer" }],
+                    },
+                    {
+                        media_type: "video", name: "video-public", model_name: "video-public", display_name: "视频模型",
+                        price_quota: 2.5, max_reference_images: 4, max_reference_videos: 2, max_reference_audios: 1,
+                        supported_seconds: [4, 8], supported_resolutions: ["720p", "1080p"], supported_sizes: ["16:9", "1:1"],
+                        supports_face: true, charge_mode: "per_second", calls: [],
                     },
                 ],
             },
@@ -90,5 +96,15 @@ describe("ModelsPage", () => {
         expect(example?.classList.contains("break-words")).toBe(true);
         expect(example?.className).toContain("[overflow-wrap:anywhere]");
         expect(example?.classList.contains("overflow-x-auto")).toBe(false);
+    });
+
+    it("shows the complete video capability contract and billing unit", () => {
+        expect(container.textContent).toContain("参考素材：4 图 / 2 视频 / 1 音频");
+        expect(container.textContent).toContain("支持秒数：4 / 8");
+        expect(container.textContent).toContain("支持分辨率：720p / 1080p");
+        expect(container.textContent).toContain("支持尺寸/画幅：16:9 / 1:1");
+        expect(container.textContent).toContain("支持人脸：支持");
+        expect(container.textContent).toContain("计费方式：按秒");
+        expect(container.textContent).toContain("预扣价格：2.5 / 秒");
     });
 });

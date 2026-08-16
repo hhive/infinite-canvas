@@ -48,7 +48,7 @@ describe("media video task API", () => {
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "video" }, withCredentials: true }));
         expect(axios.post).toHaveBeenCalledWith(
             "/v1/videos",
-            expect.objectContaining({ model: "media-video-create", model_config_id: 7, prompt: "ocean at dusk", charge_mode: "per_request", generate_audio: true, watermark: false, reference_images: [], reference_videos: [], reference_audios: [] }),
+            expect.objectContaining({ model: "media-video-create", model_config_id: 7, prompt: "ocean at dusk", charge_mode: "per_request", supports_face: true, generate_audio: true, watermark: false, reference_images: [], reference_videos: [], reference_audios: [] }),
             expect.objectContaining({ headers: { Authorization: "Bearer secret-key" }, withCredentials: true }),
         );
     });
@@ -65,6 +65,15 @@ describe("media video task API", () => {
             expect.objectContaining({ resolution: "720p", size: "16:9", seconds: 4, watermark: false }),
             expect.anything(),
         );
+    });
+
+    it("rejects resolution and size values outside the selected model capabilities", async () => {
+        vi.mocked(axios.get).mockResolvedValue({ data: [{ id: 7, model: "seedance-2.0", media_type: "video", supported_resolutions: ["720p"], supported_sizes: ["16:9"] }] });
+        const unsupportedResolution = { ...config("seedance-2.0"), vquality: "1080p", size: "16:9", videoSeconds: "4" };
+        await expect(createVideoGenerationTask(unsupportedResolution, "test")).rejects.toThrow("分辨率")
+        const unsupportedSize = { ...config("seedance-2.0"), vquality: "720p", size: "1:1", videoSeconds: "4" };
+        await expect(createVideoGenerationTask(unsupportedSize, "test")).rejects.toThrow("尺寸")
+        expect(axios.post).not.toHaveBeenCalled();
     });
 
     it("maps running and failed server states without provider routing", async () => {

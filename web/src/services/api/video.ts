@@ -23,7 +23,7 @@ export type VideoGenerationTaskState =
     | { status: "failed"; task: VideoGenerationTask; error: string };
 
 type RequestOptions = { signal?: AbortSignal; onTask?: (task: VideoGenerationTask) => void | Promise<void> };
-type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[]; supports_face?: boolean; charge_mode?: "per_request" | "per_second" };
+type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[]; supported_resolutions?: string[]; supported_sizes?: string[]; supports_face?: boolean; charge_mode?: "per_request" | "per_second" };
 type UploadResponse = { upload_token?: string; token?: string; id?: string | number };
 type MediaVideoTask = {
     task_id?: string;
@@ -79,7 +79,11 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const modelConfig = await resolveVideoModelConfig(model, requestConfig.apiKey, options?.signal);
     const modelConfigId = modelConfig.id;
     const seconds = normalizeSeedanceDuration(config.videoSeconds);
+    const resolution = normalizeSeedanceResolution(config.vquality, model);
+    const size = normalizeSeedanceRatio(config.size);
     if (Array.isArray(modelConfig.supported_seconds) && !modelConfig.supported_seconds.includes(seconds)) throw new Error(`当前视频模型不支持 ${seconds} 秒`);
+    if (!supportsVideoCapability(modelConfig.supported_resolutions, resolution)) throw new Error(`当前视频模型不支持分辨率 ${resolution}`);
+    if (!supportsVideoCapability(modelConfig.supported_sizes, size)) throw new Error(`当前视频模型不支持尺寸 ${size}`);
     validateVideoReferenceCounts(
         { images: referenceLimit(modelConfig.max_reference_images), videos: referenceLimit(modelConfig.max_reference_videos), audios: referenceLimit(modelConfig.max_reference_audios) },
         { images: references.length, videos: videoReferences.length, audios: audioReferences.length },
@@ -98,9 +102,10 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
                 model_config_id: modelConfigId,
                 prompt,
                 seconds,
-                size: normalizeSeedanceRatio(config.size),
-                resolution: normalizeSeedanceResolution(config.vquality, model),
+                size,
+                resolution,
                 charge_mode: modelConfig.charge_mode || "per_request",
+                supports_face: true,
                 generate_audio: true,
                 watermark: false,
                 reference_images: referenceImages,
@@ -173,6 +178,12 @@ export function validateVideoReferenceCounts(limits: { images: number; videos: n
 
 function referenceLimit(value: number | undefined) {
     return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0;
+}
+
+function supportsVideoCapability(values: string[] | undefined, requested: string) {
+    if (!Array.isArray(values) || values.length === 0) return true;
+    const normalized = requested.trim().toLowerCase();
+    return values.some((value) => value.trim().toLowerCase() === normalized);
 }
 
 async function uploadReference(file: File, kind: "image" | "video" | "audio", modelConfigId: number, apiKey: string, signal?: AbortSignal) {

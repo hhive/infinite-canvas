@@ -14,6 +14,8 @@ export type MediaModel = {
     maxReferenceVideos?: number;
     maxReferenceAudios?: number;
     supportedSeconds?: number[];
+    supportedResolutions?: string[];
+    supportedSizes?: string[];
 };
 
 function authHeaders(apiKey: string) {
@@ -64,6 +66,8 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
             maxReferenceVideos: referenceLimit(item.max_reference_videos),
             maxReferenceAudios: referenceLimit(item.max_reference_audios),
             supportedSeconds: supportedSeconds(item.supported_seconds),
+            supportedResolutions: stringCapabilities(item.supported_resolutions),
+            supportedSizes: stringCapabilities(item.supported_sizes),
         });
     }
     return models;
@@ -81,6 +85,11 @@ function stringValue(value: unknown) {
 function supportedSeconds(value: unknown) {
     if (!Array.isArray(value)) return [];
     return [...new Set(value.map(Number).filter((item) => Number.isSafeInteger(item) && item > 0 && item <= 3600))].sort((a, b) => a - b);
+}
+
+function stringCapabilities(value: unknown) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.map(stringValue).map((item) => item.toLowerCase()).filter(Boolean))];
 }
 
 function referenceLimit(value: unknown) {
