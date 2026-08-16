@@ -23,7 +23,7 @@ export type VideoGenerationTaskState =
     | { status: "failed"; task: VideoGenerationTask; error: string };
 
 type RequestOptions = { signal?: AbortSignal; onTask?: (task: VideoGenerationTask) => void | Promise<void> };
-type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[]; supported_resolutions?: string[]; supported_sizes?: string[]; supports_face?: boolean; charge_mode?: "per_request" | "per_second" };
+type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[]; supported_resolutions?: string[]; supports_face?: boolean; charge_mode?: "per_request" | "per_second" };
 type UploadResponse = { upload_token?: string; token?: string; id?: string | number };
 type MediaVideoTask = {
     task_id?: string;
@@ -83,7 +83,6 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const size = normalizeSeedanceRatio(config.size);
     if (Array.isArray(modelConfig.supported_seconds) && !modelConfig.supported_seconds.includes(seconds)) throw new Error(`当前视频模型不支持 ${seconds} 秒`);
     if (!supportsVideoCapability(modelConfig.supported_resolutions, resolution)) throw new Error(`当前视频模型不支持分辨率 ${resolution}`);
-    if (!supportsVideoCapability(modelConfig.supported_sizes, size)) throw new Error(`当前视频模型不支持尺寸 ${size}`);
     validateVideoReferenceCounts(
         { images: referenceLimit(modelConfig.max_reference_images), videos: referenceLimit(modelConfig.max_reference_videos), audios: referenceLimit(modelConfig.max_reference_audios) },
         { images: references.length, videos: videoReferences.length, audios: audioReferences.length },

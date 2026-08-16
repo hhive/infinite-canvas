@@ -67,12 +67,10 @@ describe("media video task API", () => {
         );
     });
 
-    it("rejects resolution and size values outside the selected model capabilities", async () => {
-        vi.mocked(axios.get).mockResolvedValue({ data: [{ id: 7, model: "seedance-2.0", media_type: "video", supported_resolutions: ["720p"], supported_sizes: ["16:9"] }] });
+    it("rejects resolution values outside the selected model capabilities", async () => {
+        vi.mocked(axios.get).mockResolvedValue({ data: [{ id: 7, model: "seedance-2.0", media_type: "video", supported_resolutions: ["720p"] }] });
         const unsupportedResolution = { ...config("seedance-2.0"), vquality: "1080p", size: "16:9", videoSeconds: "4" };
         await expect(createVideoGenerationTask(unsupportedResolution, "test")).rejects.toThrow("分辨率")
-        const unsupportedSize = { ...config("seedance-2.0"), vquality: "720p", size: "1:1", videoSeconds: "4" };
-        await expect(createVideoGenerationTask(unsupportedSize, "test")).rejects.toThrow("尺寸")
         expect(axios.post).not.toHaveBeenCalled();
     });
 
