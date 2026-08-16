@@ -429,13 +429,13 @@ function uniqueRawModels(models: string[]) {
     return Array.from(new Set((models || []).map((model) => modelOptionName(model).trim()).filter(Boolean)));
 }
 
-function uniqueMediaModels(models: MediaModel[], capability: MediaCapability) {
+function uniqueMediaModels(models: MediaModel[], _capability: MediaCapability) {
     const seen = new Set<string>();
     const unique: MediaModel[] = [];
     for (const item of models) {
         const model = item.model.trim();
         const displayName = item.displayName.trim() || model;
-        const selectionModel = capability === "image" ? displayName : model;
+        const selectionModel = model;
         if (!selectionModel || seen.has(selectionModel)) continue;
         seen.add(selectionModel);
         unique.push(selectionModel === item.model && displayName === item.displayName ? item : { ...item, model: selectionModel, displayName });

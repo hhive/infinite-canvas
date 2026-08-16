@@ -1,6 +1,7 @@
 import type { NavigateFunction } from "react-router-dom";
 
 import { fetchPrompts } from "@/services/api/prompts";
+import { mediaModelDisplayName } from "@/services/api/media-models";
 import { uploadImage } from "@/services/image-storage";
 import { imageAspectOptions, imageQualityOptions } from "@/components/image-settings-panel";
 import { videoResolutionOptions, videoSecondOptions, videoSizeOptions } from "@/components/video-settings-panel";
@@ -83,11 +84,11 @@ function listCanvasProjects(input: SiteToolInput) {
 }
 
 function getImageConfig() {
-    const { config } = useConfigStore.getState();
+    const { config, mediaModels } = useConfigStore.getState();
     const model = config.imageModel || config.model;
     return {
         current: { model, modelName: modelOptionName(model), quality: config.quality || "auto", size: config.size || "1:1", count: config.count || "1" },
-        models: config.imageModels.map((value) => ({ value, label: modelOptionLabel(config, value) })),
+        models: config.imageModels.map((value) => ({ value, label: mediaModelDisplayName(mediaModels.image, value) })),
         qualityOptions: imageQualityOptions,
         sizeOptions: imageAspectOptions,
         countRange: { min: 1, max: 15 },
@@ -123,7 +124,7 @@ function runImageWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
 }
 
 function getVideoConfig() {
-    const { config } = useConfigStore.getState();
+    const { config, mediaModels } = useConfigStore.getState();
     const model = config.videoModel || config.model;
     return {
         current: {
@@ -135,7 +136,7 @@ function getVideoConfig() {
             generateAudio: config.videoGenerateAudio !== "false",
             watermark: config.videoWatermark === "true",
         },
-        models: config.videoModels.map((value) => ({ value, label: modelOptionLabel(config, value) })),
+        models: config.videoModels.map((value) => ({ value, label: mediaModelDisplayName(mediaModels.video, value) })),
         sizeOptions: videoSizeOptions,
         secondsOptions: videoSecondOptions,
         resolutionOptions: videoResolutionOptions,

@@ -37,16 +37,16 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
         if (!raw || typeof raw !== "object") continue;
         const item = raw as Record<string, unknown>;
         if (capability === "image") {
-            const model = typeof item.id === "string" ? item.id.trim() : "";
+            const model = stringValue(item.model_name) || stringValue(item.id);
             if (!model || seenSelectionModels.has(model)) continue;
             seenSelectionModels.add(model);
-            models.push({ id: model, mediaType: "image", model, displayName: model, providerName: "", apiMode: "", priceQuota: 0 });
+            models.push({ id: model, mediaType: "image", model, displayName: stringValue(item.display_name) || model, providerName: stringValue(item.provider_name), apiMode: stringValue(item.api_mode), priceQuota: 0 });
             continue;
         }
-        const model = typeof item.model === "string" ? item.model.trim() : "";
+        const model = stringValue(item.model_name) || stringValue(item.display_name) || stringValue(item.model);
         const id = Number(item.id);
-        const displayName = typeof item.display_name === "string" && item.display_name.trim() ? item.display_name.trim() : model;
-        const selectionModel = displayName;
+        const displayName = stringValue(item.display_name) || model;
+        const selectionModel = model;
         const mediaType = typeof item.media_type === "string" ? item.media_type : capability;
         if (!Number.isSafeInteger(id) || id <= 0 || !model || !selectionModel || mediaType !== capability || seenIds.has(id) || seenSelectionModels.has(selectionModel)) continue;
         const rawPriceQuota = Number(item.price_quota);
@@ -67,6 +67,15 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
         });
     }
     return models;
+}
+
+export function mediaModelDisplayName(models: ReadonlyArray<Pick<MediaModel, "model" | "displayName">>, option: string) {
+    const model = option.includes("::") ? option.slice(option.indexOf("::") + 2) : option;
+    return models.find((item) => item.model === model)?.displayName || model;
+}
+
+function stringValue(value: unknown) {
+    return typeof value === "string" ? value.trim() : "";
 }
 
 function supportedSeconds(value: unknown) {

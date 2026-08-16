@@ -8,17 +8,22 @@ vi.mock("axios", () => ({ default: { get: vi.fn() } }));
 afterEach(() => vi.clearAllMocks());
 
 describe("fetchMediaModels", () => {
-    it("loads OpenAI-compatible image model records and uses the public id as identity", async () => {
+    it("keeps image model names as request identities and display names as labels", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({
             data: {
                 object: "list",
-                data: [{ id: " gpt-image-2 " }, { id: "gpt-image-2" }, { id: "GPT-Image-2" }, { id: "   " }, null, "not-an-object"],
+                data: [
+                    { id: " image-public-1 ", model_name: " image-public-1 ", display_name: "完整图片显示名称" },
+                    { id: "image-public-2", model_name: "image-public-2", display_name: "完整图片显示名称" },
+                    { id: "image-public-1", display_name: "重复记录" },
+                    { id: "   " }, null, "not-an-object",
+                ],
             },
         });
 
         await expect(fetchMediaModels("image", "sk-test")).resolves.toEqual([
-            { id: "gpt-image-2", mediaType: "image", model: "gpt-image-2", displayName: "gpt-image-2", providerName: "", apiMode: "", priceQuota: 0 },
-            { id: "GPT-Image-2", mediaType: "image", model: "GPT-Image-2", displayName: "GPT-Image-2", providerName: "", apiMode: "", priceQuota: 0 },
+            { id: "image-public-1", mediaType: "image", model: "image-public-1", displayName: "完整图片显示名称", providerName: "", apiMode: "", priceQuota: 0 },
+            { id: "image-public-2", mediaType: "image", model: "image-public-2", displayName: "完整图片显示名称", providerName: "", apiMode: "", priceQuota: 0 },
         ]);
         expect(axios.get).toHaveBeenCalledWith("/v1/models", {
             headers: { Authorization: "Bearer sk-test" },
@@ -33,17 +38,17 @@ describe("fetchMediaModels", () => {
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "video" } }));
     });
 
-    it("uses distinct video display names as public model identities when the upstream model matches", async () => {
+    it("keeps video model names separate from display names", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({
             data: [
-                { id: 15, media_type: "video", model: "seedance-2.0-mini", display_name: "seedance-2.0-mini" },
-                { id: 16, media_type: "video", model: "seedance-2.0-mini", display_name: "seedance-2.0-mini-1" },
+                { id: 15, media_type: "video", model: "upstream-video", model_name: "video-public-1", display_name: "完整视频显示名称" },
+                { id: 16, media_type: "video", model: "upstream-video", model_name: "video-public-2", display_name: "完整视频显示名称" },
             ],
         });
 
         await expect(fetchMediaModels("video")).resolves.toMatchObject([
-            { id: 15, model: "seedance-2.0-mini", displayName: "seedance-2.0-mini" },
-            { id: 16, model: "seedance-2.0-mini-1", displayName: "seedance-2.0-mini-1" },
+            { id: 15, model: "video-public-1", displayName: "完整视频显示名称" },
+            { id: 16, model: "video-public-2", displayName: "完整视频显示名称" },
         ]);
     });
 

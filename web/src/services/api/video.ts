@@ -23,7 +23,7 @@ export type VideoGenerationTaskState =
     | { status: "failed"; task: VideoGenerationTask; error: string };
 
 type RequestOptions = { signal?: AbortSignal; onTask?: (task: VideoGenerationTask) => void | Promise<void> };
-type VideoModel = { id: number; model: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[] };
+type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[] };
 type UploadResponse = { upload_token?: string; token?: string; id?: string | number };
 type MediaVideoTask = {
     task_id?: string;
@@ -161,7 +161,7 @@ async function resolveVideoModelConfig(model: string, apiKey: string, signal?: A
 }
 
 function publicVideoModelName(model: VideoModel) {
-    return model.display_name?.trim() || model.model.trim();
+    return model.model_name?.trim() || model.display_name?.trim() || model.model.trim();
 }
 
 export function validateVideoReferenceCounts(limits: { images: number; videos: number; audios: number }, counts: { images: number; videos: number; audios: number }) {

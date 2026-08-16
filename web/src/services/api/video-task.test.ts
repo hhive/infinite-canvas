@@ -39,7 +39,7 @@ describe("media video task API", () => {
         expect(() => validateVideoReferenceCounts(limits, { ...limits, audios: 2 })).toThrow("音频");
     });
     it("resolves the server model and creates a same-origin domain request", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "upstream-video", display_name: "media-video-create", media_type: "video" }] });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "upstream-video", model_name: "media-video-create", display_name: "完整视频显示名称", media_type: "video" }] });
         vi.mocked(axios.post).mockResolvedValueOnce({ data: { task_id: "video-1", status: "queued", model_config_id: 7, model: "media-video-create", poll_after_ms: 1500 } });
 
         const created = await createVideoGenerationTask(config("media-video-create", "secret-key"), "ocean at dusk");

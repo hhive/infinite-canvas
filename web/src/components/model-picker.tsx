@@ -46,7 +46,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         >
             <SelectTrigger
                 className={cn(
-                    "canvas-composer-model-picker h-8 w-fit max-w-full gap-2 rounded-full border border-input bg-transparent px-3 text-sm font-normal shadow-sm transition-colors",
+                    "canvas-composer-model-picker h-auto min-h-8 w-fit max-w-full items-start gap-2 whitespace-normal rounded-full border border-input bg-transparent px-3 py-1.5 text-sm font-normal shadow-sm transition-colors data-[size=default]:h-auto",
                     fullWidth ? "w-full min-w-0 justify-start" : "min-w-[9rem] justify-start",
                     "data-[state=open]:border-ring data-[state=open]:ring-2 data-[state=open]:ring-ring/20",
                     className,
@@ -112,7 +112,7 @@ function ModelText({ config, model, mediaModels, className }: { config: AiConfig
     const identity = item ? mediaModelIdentity(item) : modelOptionLabel(config, model);
     return (
         <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-left", className)}>
-            <span className="min-w-0 flex-1 truncate">{identity}</span>
+            <span className="min-w-0 flex-1 whitespace-normal break-words">{identity}</span>
             {item?.mediaType === "video" ? <span className="shrink-0">{formatPriceQuota(item.priceQuota)} / 次</span> : null}
         </span>
     );

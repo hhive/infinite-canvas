@@ -32,7 +32,7 @@ describe("config authentication cleanup", () => {
 });
 
 describe("applyMediaModels", () => {
-    it("groups image records by normalized display name", () => {
+    it("keeps distinct image model names when display names match", () => {
         useConfigStore.setState((state) => ({
             config: {
                 ...state.config,
@@ -48,12 +48,14 @@ describe("applyMediaModels", () => {
         ]);
 
         const state = useConfigStore.getState();
-        expect(state.mediaModels.image).toEqual([imageModel(11, "gpt-image-2", "gpt-image-2")]);
-        expect(state.config.imageModels).toEqual(["default::gpt-image-2"]);
-        expect(state.config.channels[0].models.filter((model) => model === "gpt-image-2")).toHaveLength(1);
-        expect(state.config.channels[0].models).not.toEqual(expect.arrayContaining(["gpt-image-2-1k", "gpt-image-2-2k", "gpt-image-2-4k"]));
-        expect(state.config.models.filter((model) => model === "default::gpt-image-2")).toHaveLength(1);
-        expect(state.config.imageModel).toBe("default::gpt-image-2");
+        expect(state.mediaModels.image).toEqual([
+            imageModel(11, "gpt-image-2-2k", "gpt-image-2"),
+            imageModel(12, "gpt-image-2-4k", "gpt-image-2"),
+            imageModel(13, "gpt-image-2-1k", "gpt-image-2"),
+        ]);
+        expect(state.config.imageModels).toEqual(["default::gpt-image-2-2k", "default::gpt-image-2-4k", "default::gpt-image-2-1k"]);
+        expect(state.config.models).toEqual(expect.arrayContaining(["default::gpt-image-2-2k", "default::gpt-image-2-4k", "default::gpt-image-2-1k"]));
+        expect(state.config.imageModel).toBe("default::gpt-image-2-1k");
     });
 
     it("does not group video records by display name", () => {

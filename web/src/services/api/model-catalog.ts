@@ -4,6 +4,8 @@ export type MarketplaceCall = { label: string; method: string; path: string; exa
 export type MarketplaceModel = {
     media_type: "image" | "video";
     name: string;
+    model_name?: string;
+    display_name?: string;
     provider?: string;
     sizes?: string[];
     qualities?: string[];

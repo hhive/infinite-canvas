@@ -1,22 +1,96 @@
 import { Copy, ExternalLink } from "lucide-react";
 import { App, Button, Card, Empty, Modal, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
+
 import { fetchModelCatalog, imagePricingRows, type MarketplaceModel, type MarketplaceResponse } from "@/services/api/model-catalog";
 
-function money(value?: number) { return typeof value === "number" && value > 0 ? value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : "-"; }
+function money(value?: number) {
+    return typeof value === "number" && value > 0 ? value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : "-";
+}
+
 const resolutionLabels = new Set(["1K", "2K", "4K"]);
 const qualityLabels = new Set(["低", "中", "高"]);
-function priceText(model: MarketplaceModel, labels: Set<string>) { return imagePricingRows(model).filter(row => labels.has(row.label)).map(row => `${row.label} ${money(row.price)}`).join(" · "); }
+
+function priceText(model: MarketplaceModel, labels: Set<string>) {
+    return imagePricingRows(model)
+        .filter((row) => labels.has(row.label))
+        .map((row) => `${row.label} ${money(row.price)}`)
+        .join(" · ");
+}
+
+function displayName(model: MarketplaceModel) {
+    return model.display_name?.trim() || model.model_name?.trim() || model.name;
+}
+
+function modelName(model: MarketplaceModel) {
+    return model.model_name?.trim() || model.name;
+}
+
+function ModelNames({ model }: { model: MarketplaceModel }) {
+    return (
+        <div className="min-w-0 flex-1">
+            <div className="whitespace-normal break-words font-semibold leading-5">{displayName(model)}</div>
+            <code className="mt-1 block whitespace-normal break-all text-xs font-normal text-stone-500 dark:text-stone-400">{modelName(model)}</code>
+        </div>
+    );
+}
 
 export default function ModelsPage() {
     const { message } = App.useApp();
     const [data, setData] = useState<MarketplaceResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [selected, setSelected] = useState<MarketplaceModel | null>(null);
-    useEffect(() => { const controller = new AbortController(); void fetchModelCatalog(controller.signal).then(setData).catch((error) => { if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : "获取模型广场失败"); }).finally(() => { if (!controller.signal.aborted) setLoading(false); }); return () => controller.abort(); }, [message]);
-    const copy = async (example: string) => { await navigator.clipboard.writeText(example); message.success("调用示例已复制"); };
+
+    useEffect(() => {
+        const controller = new AbortController();
+        void fetchModelCatalog(controller.signal)
+            .then(setData)
+            .catch((error) => {
+                if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : "获取模型广场失败");
+            })
+            .finally(() => {
+                if (!controller.signal.aborted) setLoading(false);
+            });
+        return () => controller.abort();
+    }, [message]);
+
+    const copy = async (example: string) => {
+        await navigator.clipboard.writeText(example);
+        message.success("调用示例已复制");
+    };
     const hasField = (field: string) => data?.fields.includes(field) ?? true;
+
     if (loading) return <div className="flex h-full items-center justify-center"><Spin /></div>;
     if (!data?.enabled) return <div className="flex h-full items-center justify-center"><Empty description="模型广场暂未开放" /></div>;
-    return <div className="h-full overflow-y-auto bg-background px-4 py-8 text-stone-800 dark:text-stone-100"><div className="mx-auto max-w-7xl"><div className="mb-8"><h1 className="text-3xl font-semibold tracking-tight">模型广场</h1><p className="mt-2 text-sm text-stone-500 dark:text-stone-400">按 Sub2API 分组查看可用能力与实际售价。</p></div>{data.groups.map((group) => <section key={group.id} className="mb-10"><div className="mb-4 flex items-center gap-3"><h2 className="text-xl font-semibold">{group.name}</h2><Tag>{group.models.length} 个模型</Tag></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{group.models.map((model) => <Card key={`${group.id}-${model.media_type}-${model.name}`} hoverable onClick={() => setSelected(model)} title={<div className="flex items-center justify-between gap-2"><span className="truncate">{model.name}</span><Tag color={model.media_type === "image" ? "blue" : "purple"}>{model.media_type === "image" ? "图片" : "视频"}</Tag></div>}><div className="space-y-2 text-sm">{hasField("provider") ? <div className="text-stone-500">{model.provider || "未注明供应商"}</div> : null}{model.media_type === "image" ? <>{hasField("sizes") && model.sizes?.length ? <div>尺寸：{model.sizes.join(" / ")}</div> : null}{hasField("qualities") && model.qualities?.length ? <div>质量：{model.qualities.join(" / ")}</div> : null}{hasField("prices") ? <>{priceText(model, resolutionLabels) ? <div>分辨率价格：{priceText(model, resolutionLabels)}</div> : null}{priceText(model, qualityLabels) ? <div>质量价格：{priceText(model, qualityLabels)}</div> : null}{priceText(model, resolutionLabels) && priceText(model, qualityLabels) ? <div className="text-xs text-stone-500">分辨率和质量同时传入时，按两者中较高价格计费。</div> : null}</> : null}</> : <>{hasField("video_capabilities") ? <><div>参考素材：{model.max_reference_images || 0} 图 / {model.max_reference_videos || 0} 视频 / {model.max_reference_audios || 0} 音频</div><div>支持秒数：{model.supported_seconds?.join(" / ") || "-"}</div></> : null}{hasField("prices") ? <div>预扣价格：{money(model.price_quota)} / 次</div> : null}</>}<div className="flex items-center gap-1 pt-2 text-xs text-stone-500"><ExternalLink className="size-3.5" />点击查看 API 调用说明</div></div></Card>)}</div></section>)}{data.groups.length === 0 ? <Empty description="暂无可展示模型" /> : null}</div><Modal open={Boolean(selected)} title={selected ? `${selected.name} · API 调用说明` : "API 调用说明"} onCancel={() => setSelected(null)} footer={null}><div className="space-y-5">{selected?.media_type === "image" && selected.qualities?.length ? <p className="text-xs text-stone-500">支持质量参数；分辨率和质量同时传入时按两者中较高价格计费。</p> : null}{selected?.calls.map((call) => <section key={`${call.method}-${call.path}`} className="space-y-2"><div className="flex items-center justify-between gap-2"><div><strong>{call.label}</strong><div><code>{call.method} {call.path}</code></div></div><Button type="text" icon={<Copy className="size-4" />} aria-label={`复制${call.label}`} onClick={() => void copy(call.example)} /></div><div className="text-xs text-stone-500">{call.auth}</div><pre className="overflow-x-auto rounded-md bg-stone-950 p-4 text-xs text-stone-100">{call.example}</pre></section>)}</div></Modal></div>;
+
+    return (
+        <div className="h-full overflow-y-auto bg-background px-4 py-8 text-stone-800 dark:text-stone-100">
+            <div className="mx-auto max-w-7xl">
+                <div className="mb-8"><h1 className="text-3xl font-semibold tracking-tight">模型广场</h1><p className="mt-2 text-sm text-stone-500 dark:text-stone-400">按 Sub2API 分组查看可用能力与实际售价。</p></div>
+                {data.groups.map((group) => (
+                    <section key={group.id} className="mb-10">
+                        <div className="mb-4 flex items-center gap-3"><h2 className="text-xl font-semibold">{group.name}</h2><Tag>{group.models.length} 个模型</Tag></div>
+                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            {group.models.map((model) => (
+                                <Card key={`${group.id}-${model.media_type}-${modelName(model)}`} hoverable onClick={() => setSelected(model)} title={<div className="flex items-start justify-between gap-2"><ModelNames model={model} /><Tag className="shrink-0" color={model.media_type === "image" ? "blue" : "purple"}>{model.media_type === "image" ? "图片" : "视频"}</Tag></div>}>
+                                    <div className="space-y-2 text-sm">
+                                        {hasField("provider") ? <div className="break-words text-stone-500">{model.provider || "未注明供应商"}</div> : null}
+                                        {model.media_type === "image" ? <>{hasField("sizes") && model.sizes?.length ? <div>尺寸：{model.sizes.join(" / ")}</div> : null}{hasField("qualities") && model.qualities?.length ? <div>质量：{model.qualities.join(" / ")}</div> : null}{hasField("prices") ? <>{priceText(model, resolutionLabels) ? <div>分辨率价格：{priceText(model, resolutionLabels)}</div> : null}{priceText(model, qualityLabels) ? <div>质量价格：{priceText(model, qualityLabels)}</div> : null}{priceText(model, resolutionLabels) && priceText(model, qualityLabels) ? <div className="text-xs text-stone-500">分辨率和质量同时传入时，按两者中较高价格计费。</div> : null}</> : null}</> : <>{hasField("video_capabilities") ? <><div>参考素材：{model.max_reference_images || 0} 图 / {model.max_reference_videos || 0} 视频 / {model.max_reference_audios || 0} 音频</div><div>支持秒数：{model.supported_seconds?.join(" / ") || "-"}</div></> : null}{hasField("prices") ? <div>预扣价格：{money(model.price_quota)} / 次</div> : null}</>}
+                                        <div className="flex items-center gap-1 pt-2 text-xs text-stone-500"><ExternalLink className="size-3.5" />点击查看 API 调用说明</div>
+                                    </div>
+                                </Card>
+                            ))}
+                        </div>
+                    </section>
+                ))}
+                {data.groups.length === 0 ? <Empty description="暂无可展示模型" /> : null}
+            </div>
+            <Modal open={Boolean(selected)} title={selected ? <ModelNames model={selected} /> : "API 调用说明"} onCancel={() => setSelected(null)} footer={null}>
+                <div className="space-y-5">
+                    {selected?.media_type === "image" && selected.qualities?.length ? <p className="text-xs text-stone-500">支持质量参数；分辨率和质量同时传入时按两者中较高价格计费。</p> : null}
+                    {selected?.calls.map((call) => <section key={`${call.method}-${call.path}`} className="space-y-2"><div className="flex items-center justify-between gap-2"><div><strong>{call.label}</strong><div><code>{call.method} {call.path}</code></div></div><Button type="text" icon={<Copy className="size-4" />} aria-label={`复制${call.label}`} onClick={() => void copy(call.example)} /></div><div className="text-xs text-stone-500">{call.auth}</div><pre className="overflow-x-auto rounded-md bg-stone-950 p-4 text-xs text-stone-100">{call.example}</pre></section>)}
+                </div>
+            </Modal>
+        </div>
+    );
 }

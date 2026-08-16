@@ -198,8 +198,11 @@ describe("ModelPicker", () => {
         expect(layout?.classList.contains("flex")).toBe(true);
         expect(layout?.classList.contains("min-w-0")).toBe(true);
         expect(layout?.classList.contains("w-full")).toBe(true);
-        expect(identity?.classList.contains("truncate")).toBe(true);
+        expect(identity?.classList.contains("truncate")).toBe(false);
+        expect(identity?.classList.contains("break-words")).toBe(true);
         expect(price?.classList.contains("shrink-0")).toBe(true);
+        expect(trigger?.classList.contains("data-[size=default]:h-auto")).toBe(true);
+        expect(trigger?.classList.contains("items-start")).toBe(true);
         expect(trigger?.title).toContain("12 / 次");
         expect(option?.getAttribute("data-text-value")).toContain("12 / 次");
     });

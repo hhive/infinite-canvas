@@ -15,6 +15,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { cancelImageTask, prepareImageEditReferences, requestEdit, requestGeneration, resumeImageTask, type ImageTask, type ImageTaskStatus } from "@/services/api/image";
+import { mediaModelDisplayName } from "@/services/api/media-models";
 import { canResumeImageTask, imageTaskAuthIdentity, readImageWorkbenchTasks, removeImageWorkbenchTask, resolveImageTaskCancel, resumeImageWorkbenchRecord, saveImageWorkbenchTask, type ImageWorkbenchTaskRecord } from "@/services/image-task-storage";
 import { deleteStoredImages, IMAGE_UPLOAD_ACCEPT, INVALID_IMAGE_FORMAT_MESSAGE, isInvalidImageFormatError, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -77,6 +78,7 @@ export default function ImagePage() {
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const imageModels = useConfigStore((state) => state.mediaModels?.image ?? []);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
     const [references, setReferences] = useState<ReferenceImage[]>([]);
@@ -576,11 +578,11 @@ export default function ImagePage() {
                                 </div>
                             </div>
 
-                            <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
-                                <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {effectiveConfig.size} · {effectiveConfig.quality}
+                            <div className="flex items-start justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
+                                <span className="min-w-0 whitespace-normal break-words text-stone-500 dark:text-stone-400">
+                                    {mediaModelDisplayName(imageModels, model)} · {effectiveConfig.size} · {effectiveConfig.quality}
                                 </span>
-                                <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
+                                <Button className="shrink-0" size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     调整
                                 </Button>
                             </div>
