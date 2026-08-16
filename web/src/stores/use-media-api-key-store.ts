@@ -24,8 +24,17 @@ const initialState = {
 
 let loadPromise: Promise<void> | null = null;
 let requestSequence = 0;
+let mediaModelRequestEpoch = 0;
 let switchController: AbortController | null = null;
 let switchMutationQueue: Promise<void> = Promise.resolve();
+
+export function currentMediaModelRequestEpoch() {
+    return mediaModelRequestEpoch;
+}
+
+export function isMediaModelRequestEpochCurrent(epoch: number) {
+    return epoch === mediaModelRequestEpoch;
+}
 
 export const useMediaAPIKeyStore = create<MediaAPIKeyStore>()((set, get) => ({
     ...initialState,
@@ -59,6 +68,7 @@ async function switchKey(apiKeyId: number, capability: MediaCapability, manual: 
     const candidate = before.keys.find((key) => key.id === apiKeyId);
     if (!candidate || modelCount(candidate, capability) <= 0 || candidate.id === before.currentKeyId) return;
     const sequence = ++requestSequence;
+    mediaModelRequestEpoch += 1;
     switchController?.abort();
     const controller = new AbortController();
     switchController = controller;
@@ -105,6 +115,7 @@ type StoreGet = () => MediaAPIKeyStore;
 export function resetMediaAPIKeyStore() {
     loadPromise = null;
     requestSequence = 0;
+    mediaModelRequestEpoch = 0;
     switchMutationQueue = Promise.resolve();
     switchController?.abort();
     switchController = null;

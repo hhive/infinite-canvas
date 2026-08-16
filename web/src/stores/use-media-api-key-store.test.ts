@@ -10,7 +10,7 @@ vi.mock("@/services/api/media-api-keys", () => ({ fetchMediaAPIKeys, switchMedia
 vi.mock("@/services/api/media-models", () => ({ fetchMediaModels }));
 
 import { useConfigStore } from "@/stores/use-config-store";
-import { resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
+import { currentMediaModelRequestEpoch, isMediaModelRequestEpochCurrent, resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
 
 const keys = [
     { id: 10, name: "Launch", maskedKey: "****0010", groupName: "默认", imageModelCount: 1, videoModelCount: 0, current: true },
@@ -39,6 +39,13 @@ describe("Media API Key session selection", () => {
         expect(switchMediaAPIKey).toHaveBeenCalledWith(20);
         expect(fetchMediaModels).toHaveBeenCalledTimes(2);
         expect(useMediaAPIKeyStore.getState().currentKeyId).toBe(20);
+    });
+
+    it("invalidates startup model responses when a key switch begins", async () => {
+        const startupEpoch = currentMediaModelRequestEpoch();
+        await useMediaAPIKeyStore.getState().activate("video", false);
+        expect(isMediaModelRequestEpochCurrent(startupEpoch)).toBe(false);
+        expect(isMediaModelRequestEpochCurrent(currentMediaModelRequestEpoch())).toBe(true);
     });
 
     it("remembers independent image and video preferences for this in-memory session", async () => {

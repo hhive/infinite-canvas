@@ -7,6 +7,7 @@ import { createModelChannel, modelOptionsFromChannels, useConfigStore } from "@/
 import { fetchChannelModels, probeImageSession } from "@/services/api/image";
 import { fetchMediaModels, type MediaCapability } from "@/services/api/media-models";
 import { readImageLaunchParams, resolveImageLaunchAuthentication } from "@/lib/image-launch-params";
+import { currentMediaModelRequestEpoch, isMediaModelRequestEpochCurrent } from "@/stores/use-media-api-key-store";
 import { usePromptSourceScheduler } from "@/hooks/use-prompt-source-scheduler";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
@@ -68,14 +69,15 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 message.error(error instanceof Error ? error.message : "读取模型失败");
             });
         const requestId = ++mediaRequest.current;
+        const requestEpoch = currentMediaModelRequestEpoch();
         for (const capability of ["image", "video"] as MediaCapability[]) {
             setMediaModelsLoading(capability);
             void fetchMediaModels(capability, authenticationKey)
                 .then((models) => {
-                    if (requestId === mediaRequest.current) applyMediaModels(capability, models);
+                    if (requestId === mediaRequest.current && isMediaModelRequestEpochCurrent(requestEpoch)) applyMediaModels(capability, models);
                 })
                 .catch((error) => {
-                    if (requestId !== mediaRequest.current) return;
+                    if (requestId !== mediaRequest.current || !isMediaModelRequestEpochCurrent(requestEpoch)) return;
                     const status = typeof error === "object" && error && "response" in error ? Number((error as { response?: { status?: number } }).response?.status) : 0;
                     setMediaModelsError(capability, error instanceof Error ? error.message : "读取媒体模型失败", status === 401);
                 });
