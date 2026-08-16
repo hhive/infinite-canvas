@@ -33,9 +33,24 @@ describe("fetchMediaModels", () => {
     });
 
     it("accepts video responses without a redundant media_type field", async () => {
-        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "seedance_content_generation", price_quota: 12, max_reference_images: 4, max_reference_videos: 3, max_reference_audios: 1, supported_seconds: [15, 4, 4, 0], supported_resolutions: ["720P", "1k", "720p"] }] });
-        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "seedance_content_generation", priceQuota: 12, maxReferenceImages: 4, maxReferenceVideos: 3, maxReferenceAudios: 1, supportedSeconds: [4, 15], supportedResolutions: ["720p", "1k"] }]);
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 8, model: "seedance-2.0-mini", api_mode: "seedance_content_generation", price_quota: 12, charge_mode: "per_second", max_reference_images: 4, max_reference_videos: 3, max_reference_audios: 1, supported_seconds: [15, 4, 4, 0], supported_resolutions: ["720P", "1k", "720p"] }] });
+        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ id: 8, mediaType: "video", model: "seedance-2.0-mini", apiMode: "seedance_content_generation", priceQuota: 12, chargeMode: "second", maxReferenceImages: 4, maxReferenceVideos: 3, maxReferenceAudios: 1, supportedSeconds: [4, 15], supportedResolutions: ["720p", "1k"] }]);
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "video" } }));
+    });
+
+    it.each([
+        ["second", "second"],
+        ["per_second", "second"],
+        [" PER_SECOND ", "second"],
+        ["SECOND", "second"],
+        ["cnt", "cnt"],
+        ["per_request", "cnt"],
+        ["", "cnt"],
+        ["invalid", "cnt"],
+        [undefined, "cnt"],
+    ])("normalizes video charge mode %s to %s", async (chargeMode, expected) => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 18, model: "video-charge-mode", charge_mode: chargeMode }] });
+        await expect(fetchMediaModels("video")).resolves.toMatchObject([{ chargeMode: expected }]);
     });
 
     it("keeps video model names separate from display names", async () => {

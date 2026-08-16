@@ -19,7 +19,7 @@ vi.mock("@/components/ui/select", () => ({
             },
             children,
         ),
-    SelectContent: ({ children }: { children: ReactNode }) => createElement("div", { "data-testid": "select-content" }, children),
+    SelectContent: ({ children, ...props }: { children: ReactNode } & ComponentProps<"div">) => createElement("div", { ...props, "data-testid": "select-content" }, children),
     SelectItem: ({ children, textValue, value }: { children: ReactNode; textValue?: string; value: string }) => createElement("div", { "data-text-value": textValue, "data-value": value }, children),
     SelectTrigger: ({ children, ...props }: ComponentProps<"button">) => createElement("button", props, children),
 }));
@@ -176,7 +176,7 @@ describe("ModelPicker", () => {
     });
 
     it("keeps responsive visibility separate from the selected video layout", () => {
-        const model = { id: 1, mediaType: "video" as const, model: "video-1", displayName: "A very long video model name", providerName: "OpenAI", apiMode: "videos", priceQuota: 12 };
+        const model = { id: 1, mediaType: "video" as const, model: "video-1", displayName: "A very long video model name", providerName: "OpenAI", apiMode: "videos", priceQuota: 12, chargeMode: "cnt" as const };
         const config = {
             ...defaultConfig,
             channels: [{ ...defaultConfig.channels[0], models: [model.model] }],
@@ -198,9 +198,12 @@ describe("ModelPicker", () => {
         expect(layout?.classList.contains("flex")).toBe(true);
         expect(layout?.classList.contains("min-w-0")).toBe(true);
         expect(layout?.classList.contains("w-full")).toBe(true);
-        expect(identity?.classList.contains("truncate")).toBe(false);
-        expect(identity?.classList.contains("break-words")).toBe(true);
+        expect(identity?.classList.contains("truncate")).toBe(true);
+        expect(identity?.classList.contains("whitespace-nowrap")).toBe(true);
         expect(price?.classList.contains("shrink-0")).toBe(true);
+        const content = container.querySelector('[data-testid="select-content"]');
+        expect(content?.classList.contains("w-max")).toBe(true);
+        expect(content?.classList.contains("max-w-[calc(100vw-24px)]")).toBe(true);
         expect(trigger?.classList.contains("data-[size=default]:h-auto")).toBe(true);
         expect(trigger?.classList.contains("items-start")).toBe(true);
         expect(trigger?.title).toContain("12 / 次");
@@ -241,6 +244,10 @@ describe("ModelPicker", () => {
 describe("mediaModelLabel", () => {
     it("shows the per-call price for video models", () => {
         expect(mediaModelLabel([{ mediaType: "video", model: "video-1", displayName: "Video", providerName: "OpenAI", priceQuota: 12 }], "video-1")).toBe("Video · OpenAI · 12 / 次");
+    });
+
+    it("shows the configured per-second price for video models", () => {
+        expect(mediaModelLabel([{ mediaType: "video", model: "seedance-2.5", displayName: "seedance-2.5", providerName: "Seedance", priceQuota: 0.39, chargeMode: "second" }], "seedance-2.5")).toBe("seedance-2.5 · Seedance · 0.39 / 秒");
     });
 
     it("keeps image model labels unchanged", () => {

@@ -66,7 +66,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             </SelectTrigger>
             <SelectContent
                 data-canvas-no-zoom
-                className="z-[1200] w-80 max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
+                className="z-[1200] w-max min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
                 position="popper"
                 align="start"
                 side="bottom"
@@ -96,7 +96,7 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
     return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
 }
 
-type MediaModelLabelData = { mediaType: string; model: string; displayName: string; providerName: string; priceQuota: number };
+type MediaModelLabelData = { mediaType: string; model: string; displayName: string; providerName: string; priceQuota: number; chargeMode?: "cnt" | "second" };
 
 function ModelLabel({ config, model, mediaModels }: { config: AiConfig; model: string; mediaModels: ReadonlyArray<MediaModelLabelData> }) {
     return (
@@ -112,8 +112,8 @@ function ModelText({ config, model, mediaModels, className }: { config: AiConfig
     const identity = item ? mediaModelIdentity(item) : modelOptionLabel(config, model);
     return (
         <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-left", className)}>
-            <span className="min-w-0 flex-1 whitespace-normal break-words">{identity}</span>
-            {item?.mediaType === "video" ? <span className="shrink-0">{formatPriceQuota(item.priceQuota)} / 次</span> : null}
+            <span className="min-w-0 flex-1 truncate whitespace-nowrap" title={identity}>{identity}</span>
+            {item?.mediaType === "video" ? <span className="shrink-0 whitespace-nowrap">{videoPriceLabel(item)}</span> : null}
         </span>
     );
 }
@@ -122,7 +122,7 @@ export function mediaModelLabel(models: ReadonlyArray<MediaModelLabelData>, opti
     const item = findMediaModel(models, option);
     if (!item) return "";
     const identity = mediaModelIdentity(item);
-    return item.mediaType === "video" ? `${identity} · ${formatPriceQuota(item.priceQuota)} / 次` : identity;
+    return item.mediaType === "video" ? `${identity} · ${videoPriceLabel(item)}` : identity;
 }
 
 function findMediaModel(models: ReadonlyArray<MediaModelLabelData>, option: string) {
@@ -139,6 +139,10 @@ function formatPriceQuota(priceQuota: number) {
     const formatted = new Intl.NumberFormat("zh-CN", { useGrouping: false, maximumFractionDigits: 6 }).format(value);
     if (formatted.length <= 24) return formatted;
     return new Intl.NumberFormat("zh-CN", { notation: "scientific", useGrouping: false, maximumFractionDigits: 6 }).format(value);
+}
+
+function videoPriceLabel(item: Pick<MediaModelLabelData, "priceQuota" | "chargeMode">) {
+    return `${formatPriceQuota(item.priceQuota)} / ${item.chargeMode === "second" ? "秒" : "次"}`;
 }
 
 function ModelIcon({ model }: { model: string }) {

@@ -1,6 +1,7 @@
 import axios from "axios";
 
 export type MediaCapability = "image" | "video";
+export type MediaChargeMode = "cnt" | "second";
 
 export type MediaModel = {
     id: number | string;
@@ -10,6 +11,7 @@ export type MediaModel = {
     providerName: string;
     apiMode: string;
     priceQuota: number;
+    chargeMode?: MediaChargeMode;
     maxReferenceImages?: number;
     maxReferenceVideos?: number;
     maxReferenceAudios?: number;
@@ -61,6 +63,7 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
             providerName: typeof item.provider_name === "string" ? item.provider_name.trim() : "",
             apiMode: typeof item.api_mode === "string" ? item.api_mode.trim() : "",
             priceQuota: Number.isFinite(rawPriceQuota) && rawPriceQuota > 0 ? rawPriceQuota : 0,
+            chargeMode: videoChargeMode(item.charge_mode),
             maxReferenceImages: referenceLimit(item.max_reference_images),
             maxReferenceVideos: referenceLimit(item.max_reference_videos),
             maxReferenceAudios: referenceLimit(item.max_reference_audios),
@@ -88,6 +91,11 @@ function supportedSeconds(value: unknown) {
 function stringCapabilities(value: unknown) {
     if (!Array.isArray(value)) return [];
     return [...new Set(value.map(stringValue).map((item) => item.toLowerCase()).filter(Boolean))];
+}
+
+function videoChargeMode(value: unknown): MediaChargeMode {
+    const mode = stringValue(value).toLowerCase();
+    return mode === "second" || mode === "per_second" ? "second" : "cnt";
 }
 
 function referenceLimit(value: unknown) {

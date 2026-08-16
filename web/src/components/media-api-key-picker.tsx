@@ -21,6 +21,8 @@ export function MediaAPIKeyPicker({ capability, taskActive, active = true, compa
 
     if (manualAPIKey || status === "idle" || status === "loading" || status === "unavailable") return null;
     const switching = status === "switching";
+    const compatibleKeys = keys.filter((key) => modelCount(key, capability) > 0);
+    const selectedKeyId = compatibleKeys.some((key) => key.id === currentKeyId) ? currentKeyId : undefined;
     return (
         <div
             className={compact ? "mb-2 min-w-0" : "col-span-2 min-w-0"}
@@ -32,11 +34,11 @@ export function MediaAPIKeyPicker({ capability, taskActive, active = true, compa
             {!compact ? <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">使用的 API Key</span> : null}
             <Select
                 className="w-full min-w-0"
-                value={currentKeyId ?? undefined}
+                value={selectedKeyId}
                 loading={switching}
-                disabled={!keys.length || switching || taskActive || !active}
-                placeholder={keys.length ? "选择 API Key" : "暂无可用 API Key"}
-                options={keys.map((key) => ({ value: key.id, disabled: modelCount(key, capability) <= 0, label: `${key.name} · ${key.groupName} · ${key.maskedKey} · 图片 ${key.imageModelCount} / 视频 ${key.videoModelCount}` }))}
+                disabled={!compatibleKeys.length || switching || taskActive || !active}
+                placeholder={compatibleKeys.length ? "选择 API Key" : "暂无当前类型可用 API Key"}
+                options={compatibleKeys.map((key) => ({ value: key.id, label: `${key.name} · ${key.groupName} · ${key.maskedKey} · 图片 ${key.imageModelCount} / 视频 ${key.videoModelCount}` }))}
                 onChange={(value) => void select(value, capability)}
                 popupMatchSelectWidth={false}
             />
