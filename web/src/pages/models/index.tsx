@@ -89,7 +89,7 @@ export default function ModelsPage() {
             <Modal open={Boolean(selected)} title={selected ? <ModelNames model={selected} /> : "API 调用说明"} onCancel={() => setSelected(null)} footer={null}>
                 <div className="space-y-5">
                     {selected?.media_type === "image" && selected.qualities?.length ? <p className="text-xs text-stone-500">支持质量参数；分辨率和质量同时传入时按两者中较高价格计费。</p> : null}
-                    {selected?.calls.map((call) => <section key={`${call.method}-${call.path}`} className="space-y-2"><div className="flex items-center justify-between gap-2"><div><strong>{call.label}</strong><div><code>{call.method} {call.path}</code></div></div><Button type="text" icon={<Copy className="size-4" />} aria-label={`复制${call.label}`} onClick={() => void copy(call.example)} /></div><div className="text-xs text-stone-500">{call.auth}</div><pre className="overflow-x-auto rounded-md bg-stone-950 p-4 text-xs text-stone-100">{call.example}</pre></section>)}
+                    {selected?.calls.map((call) => <section key={`${call.method}-${call.path}`} className="space-y-2"><div className="flex items-center justify-between gap-2"><div><strong>{call.label}</strong><div><code>{call.method} {call.path}</code></div></div><Button type="text" icon={<Copy className="size-4" />} aria-label={`复制${call.label}`} onClick={() => void copy(call.example)} /></div><div className="text-xs text-stone-500">{call.auth}</div><pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-md bg-stone-950 p-4 text-xs text-stone-100">{call.example}</pre></section>)}
                 </div>
             </Modal>
         </div>

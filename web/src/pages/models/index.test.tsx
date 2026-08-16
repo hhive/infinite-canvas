@@ -7,6 +7,10 @@ const { fetchModelCatalog, message } = vi.hoisted(() => ({
     message: { error: vi.fn(), success: vi.fn() },
 }));
 
+const longCallExample = `curl -X POST 'https://media.example.com/v1/images/generations/with/a/very/long/path/that/must/wrap/inside/the/model/marketplace/dialog' \\
+  -H 'Authorization: Bearer YOUR_API_KEY' \\
+  -d '{"model":"image-public-with-a-continuous-name-that-must-wrap-without-horizontal-dragging","prompt":"完整展示调用样例"}'`;
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock("@/services/api/model-catalog", async (importOriginal) => ({
@@ -49,7 +53,7 @@ beforeEach(async () => {
                         model_name: "image-public",
                         display_name: "完整显示名称",
                         note: "这是需要完整换行展示的公开模型备注，不应该被截断。",
-                        calls: [{ label: "同步生成", method: "POST", path: "/v1/images/generations", example: "curl image-public", auth: "Bearer" }],
+                        calls: [{ label: "同步生成", method: "POST", path: "/v1/images/generations", example: longCallExample, auth: "Bearer" }],
                     },
                 ],
             },
@@ -80,6 +84,11 @@ describe("ModelsPage", () => {
         act(() => note?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 
         expect(container.querySelector('[data-testid="model-modal"]')).toBeTruthy();
-        expect(container.textContent).toContain("curl image-public");
+        const example = container.querySelector("pre");
+        expect(example?.textContent).toBe(longCallExample);
+        expect(example?.classList.contains("whitespace-pre-wrap")).toBe(true);
+        expect(example?.classList.contains("break-words")).toBe(true);
+        expect(example?.className).toContain("[overflow-wrap:anywhere]");
+        expect(example?.classList.contains("overflow-x-auto")).toBe(false);
     });
 });
