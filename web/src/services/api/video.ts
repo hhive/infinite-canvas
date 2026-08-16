@@ -8,7 +8,7 @@ import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/sto
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
-export type VideoTaskStatus = "queued" | "running" | "completed" | "failed" | "canceled" | "cancelled" | "expired";
+export type VideoTaskStatus = "queued" | "running" | "completed" | "failed" | "expired";
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
 export type VideoGenerationTask = {
     id: string;
@@ -23,7 +23,7 @@ export type VideoGenerationTaskState =
     | { status: "failed"; task: VideoGenerationTask; error: string };
 
 type RequestOptions = { signal?: AbortSignal; onTask?: (task: VideoGenerationTask) => void | Promise<void> };
-type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[]; supported_resolutions?: string[]; supports_face?: boolean; charge_mode?: "per_request" | "per_second" };
+type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[]; supported_resolutions?: string[]; supports_face?: boolean; charge_mode?: "cnt" | "second" };
 type UploadResponse = { upload_token?: string; token?: string; id?: string | number };
 type MediaVideoTask = {
     task_id?: string;
@@ -77,7 +77,6 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const model = modelOptionName(selectedModel);
     if (!model) throw new Error("请先选择视频模型");
     const modelConfig = await resolveVideoModelConfig(model, requestConfig.apiKey, options?.signal);
-    const modelConfigId = modelConfig.id;
     const seconds = normalizeSeedanceDuration(config.videoSeconds);
     const resolution = normalizeSeedanceResolution(config.vquality, model);
     const size = normalizeSeedanceRatio(config.size);
@@ -90,20 +89,19 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
 
     try {
         const [referenceImages, referenceVideos, referenceAudios] = await Promise.all([
-            Promise.all(references.map(async (reference) => uploadReference(await imageReferenceFile(reference), "image", modelConfigId, requestConfig.apiKey, options?.signal))),
-            Promise.all(videoReferences.map(async (reference) => uploadReference(await storedMediaFile(reference, "video"), "video", modelConfigId, requestConfig.apiKey, options?.signal))),
-            Promise.all(audioReferences.map(async (reference) => uploadReference(await storedMediaFile(reference, "audio"), "audio", modelConfigId, requestConfig.apiKey, options?.signal))),
+            Promise.all(references.map(async (reference) => uploadReference(await imageReferenceFile(reference), "image", requestConfig.apiKey, options?.signal))),
+            Promise.all(videoReferences.map(async (reference) => uploadReference(await storedMediaFile(reference, "video"), "video", requestConfig.apiKey, options?.signal))),
+            Promise.all(audioReferences.map(async (reference) => uploadReference(await storedMediaFile(reference, "audio"), "audio", requestConfig.apiKey, options?.signal))),
         ]);
         const response = await axios.post<MediaVideoTask>(
             VIDEO_PATH,
             {
                 model,
-                model_config_id: modelConfigId,
                 prompt,
                 seconds,
                 size,
                 resolution,
-                charge_mode: modelConfig.charge_mode || "per_request",
+                charge_mode: modelConfig.charge_mode || "cnt",
                 supports_face: true,
                 generate_audio: true,
                 watermark: false,
@@ -136,15 +134,16 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     }
 }
 
-export async function cancelVideoGenerationTask(config: AiConfig, task: VideoGenerationTask): Promise<VideoGenerationTask> {
+/* Video task cancellation is intentionally disabled in the public contract.
+ * Restore this helper only when the backend route is re-enabled at the same time.
+export async function cancelVideoGenerationTask(config: AiConfig, task: VideoGenerationTask): Promise<void> {
     const requestConfig = resolveModelRequestConfig(config, task.model);
-    try {
-        const response = await axios.delete<MediaVideoTask>(`${VIDEO_PATH}/${encodeURIComponent(task.id)}`, { headers: sameOriginHeaders(requestConfig.apiKey), withCredentials: true });
-        return normalizeTask(response.data);
-    } catch (error) {
-        throw new Error(readAxiosError(error, "视频任务取消失败"));
-    }
+    await axios.delete(`${VIDEO_PATH}/${encodeURIComponent(task.id)}`, {
+        headers: sameOriginHeaders(requestConfig.apiKey),
+        withCredentials: true,
+    });
 }
+*/
 
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
     if (result.blob) return uploadMediaFile(result.blob, "video");
@@ -185,11 +184,11 @@ function supportsVideoCapability(values: string[] | undefined, requested: string
     return values.some((value) => value.trim().toLowerCase() === normalized);
 }
 
-async function uploadReference(file: File, kind: "image" | "video" | "audio", modelConfigId: number, apiKey: string, signal?: AbortSignal) {
+async function uploadReference(file: File, kind: "image" | "video" | "audio", apiKey: string, signal?: AbortSignal) {
     const form = new FormData();
     form.append("kind", kind);
     form.append("file", file);
-    const response = await axios.post<UploadResponse>(UPLOAD_PATH, form, { headers: sameOriginHeaders(apiKey), params: { model_config_id: modelConfigId }, signal, withCredentials: true });
+    const response = await axios.post<UploadResponse>(UPLOAD_PATH, form, { headers: sameOriginHeaders(apiKey), signal, withCredentials: true });
     const token = response.data.upload_token || response.data.token || response.data.id;
     if (token === undefined || token === "") throw new Error(`${kind === "image" ? "图片" : kind === "video" ? "视频" : "音频"}上传没有返回 token`);
     return String(token);
@@ -213,7 +212,6 @@ function normalizeTask(payload: MediaVideoTask): VideoGenerationTask {
 }
 
 function terminalStatusMessage(status: VideoTaskStatus) {
-    if (status === "canceled" || status === "cancelled") return "视频任务已取消";
     if (status === "expired") return "视频任务已过期";
     return "视频生成失败";
 }

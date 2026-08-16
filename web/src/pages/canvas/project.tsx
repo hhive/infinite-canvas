@@ -9,7 +9,7 @@ import { imageTaskAuthIdentity, matchesImageTaskAuthIdentity } from "@/services/
 import { applyImageTaskTerminalStatus, canCancelImageTaskStatus, cancelImageTaskBatch, cancelImageTaskRequest, resetInterruptedImageGeneration, resumeCanvasImageTasks } from "@/lib/canvas/image-task-recovery";
 import { normalizeInterruptedVideoGeneration, resumeCanvasVideoTasks } from "@/lib/canvas/video-task-recovery";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
-import { cancelVideoGenerationTask, requestVideoGeneration, resumeVideoGenerationTask, storeGeneratedVideo, type VideoGenerationResult, type VideoGenerationTask } from "@/services/api/video";
+import { requestVideoGeneration, resumeVideoGenerationTask, storeGeneratedVideo, type VideoGenerationResult, type VideoGenerationTask } from "@/services/api/video";
 import { DOCS_URL } from "@/constant/env";
 import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
@@ -362,19 +362,8 @@ function InfiniteCanvasPage() {
         if (!request) return;
         const node = nodesRef.current.find((item) => item.id === targetNodeId);
         if (node?.metadata?.videoTaskId && ["queued", "running"].includes(node.metadata.videoTaskStatus || "")) {
-            try {
-                const task = await cancelVideoGenerationTask(buildGenerationConfig(effectiveConfig, node, "video"), {
-                    id: node.metadata.videoTaskId,
-                    modelConfigId: node.metadata.videoTaskModelConfigId || 0,
-                    model: node.metadata.model || effectiveConfig.videoModel,
-                    status: node.metadata.videoTaskStatus as VideoGenerationTask["status"],
-                });
-                request.controller.abort();
-                generationRequestsRef.current.delete(targetNodeId);
-                setNodes((prev) => prev.map((item) => item.id === targetNodeId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, videoTaskStatus: task.status, errorDetails: "视频任务已取消" } } : item));
-            } catch (error) {
-                setNodes((prev) => prev.map((item) => item.id === targetNodeId ? { ...item, metadata: { ...item.metadata, errorDetails: error instanceof Error ? `取消失败：${error.message}` : "取消失败，请稍后重试" } } : item));
-            }
+            // Video cancellation is intentionally disabled. The former server-side
+            // implementation is retained but no longer exposed by the public API.
             return;
         }
         if (node?.metadata?.imageTaskStatus && !canCancelImageTaskStatus(node.metadata.imageTaskStatus)) return;
@@ -668,7 +657,7 @@ function InfiniteCanvasPage() {
             setConnections((prev) => [...prev, { id: nanoid(), ...connection }]);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
-            if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio && type !== CanvasNodeType.Group) setDialogNodeId(newNode.id);
+            if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio) setDialogNodeId(newNode.id);
             setPendingConnectionCreate(null);
             setConnecting(null);
         },

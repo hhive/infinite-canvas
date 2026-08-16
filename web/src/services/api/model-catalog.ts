@@ -23,7 +23,7 @@ export type MarketplaceModel = {
     supported_seconds?: number[];
     supported_resolutions?: string[];
     supports_face?: boolean;
-    charge_mode?: "per_request" | "per_second";
+    charge_mode?: "cnt" | "second";
     calls: MarketplaceCall[];
 };
 export type MarketplaceGroup = { id: number; name: string; models: MarketplaceModel[] };

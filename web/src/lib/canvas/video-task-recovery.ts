@@ -16,7 +16,7 @@ export function normalizeInterruptedVideoGeneration(nodes: CanvasNodeData[]) {
         if (node.type !== CanvasNodeType.Video || node.metadata?.status !== "loading") return node;
         if (hasStoredVideoContent(node)) return { ...node, metadata: { ...node.metadata, status: "success" as const, errorDetails: undefined } };
         if (isRecoverableVideoTaskStatus(node.metadata.videoTaskStatus, node.metadata.videoTaskId)) return node;
-        const errorDetails = node.metadata.videoTaskStatus === "failed" || node.metadata.videoTaskStatus === "canceled" || node.metadata.videoTaskStatus === "cancelled" || node.metadata.videoTaskStatus === "expired"
+        const errorDetails = node.metadata.videoTaskStatus === "failed" || node.metadata.videoTaskStatus === "expired"
             ? "视频任务已结束但成片未保存，请重新生成。"
             : "页面刷新后视频生成已中断，请重新生成。";
         return { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails } };

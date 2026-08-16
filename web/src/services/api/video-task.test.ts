@@ -1,7 +1,7 @@
 import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { cancelVideoGenerationTask, createVideoGenerationTask, pollVideoGenerationTask, validateVideoReferenceCounts, type VideoGenerationTask } from "@/services/api/video";
+import { createVideoGenerationTask, pollVideoGenerationTask, validateVideoReferenceCounts, type VideoGenerationTask } from "@/services/api/video";
 import { defaultConfig } from "@/stores/use-config-store";
 
 vi.mock("axios", () => ({
@@ -48,9 +48,32 @@ describe("media video task API", () => {
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "video" }, withCredentials: true }));
         expect(axios.post).toHaveBeenCalledWith(
             "/v1/videos",
-            expect.objectContaining({ model: "media-video-create", model_config_id: 7, prompt: "ocean at dusk", charge_mode: "per_request", supports_face: true, generate_audio: true, watermark: false, reference_images: [], reference_videos: [], reference_audios: [] }),
+            expect.objectContaining({ model: "media-video-create", prompt: "ocean at dusk", charge_mode: "cnt", supports_face: true, generate_audio: true, watermark: false, reference_images: [], reference_videos: [], reference_audios: [] }),
             expect.objectContaining({ headers: { Authorization: "Bearer secret-key" }, withCredentials: true }),
         );
+        expect(vi.mocked(axios.post).mock.calls[0]?.[1]).not.toHaveProperty("model_config_id");
+    });
+
+    it("uploads reference media without binding the upload to a model config", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "upstream-video", model_name: "media-video-create", media_type: "video", max_reference_images: 1 }] });
+        vi.mocked(axios.post)
+            .mockResolvedValueOnce({ data: { upload_token: "upload-image-1" } })
+            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "queued", model_config_id: 7, model: "media-video-create" } });
+
+        await createVideoGenerationTask(
+            config("media-video-create", "secret-key"),
+            "ocean at dusk",
+            [{ id: "image-1", name: "reference.png", type: "image/png", dataUrl: "data:image/png;base64,iVBORw0KGgo=" }],
+        );
+
+        expect(axios.post).toHaveBeenNthCalledWith(
+            1,
+            "/v1/media/uploads",
+            expect.any(FormData),
+            expect.not.objectContaining({ params: expect.anything() }),
+        );
+        expect(axios.post).toHaveBeenNthCalledWith(2, "/v1/videos", expect.objectContaining({ reference_images: ["upload-image-1"] }), expect.anything());
+        expect(vi.mocked(axios.post).mock.calls[1]?.[1]).not.toHaveProperty("model_config_id");
     });
 
     it("normalizes legacy Mini settings to the AI Proxy contract", async () => {
@@ -96,10 +119,4 @@ describe("media video task API", () => {
         expect(axios.get).toHaveBeenLastCalledWith("/v1/videos/video-1/content", expect.objectContaining({ responseType: "blob", withCredentials: true }));
     });
 
-    it("uses DELETE only for an explicit server cancellation", async () => {
-        vi.mocked(axios.delete).mockResolvedValueOnce({ data: { task_id: "video-1", status: "canceled", model_config_id: 7, model: task.model } });
-
-        await expect(cancelVideoGenerationTask(config(task.model), task)).resolves.toEqual({ ...task, status: "canceled", pollAfterMs: undefined });
-        expect(axios.delete).toHaveBeenCalledWith("/v1/videos/video-1", expect.objectContaining({ withCredentials: true }));
-    });
 });

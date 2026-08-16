@@ -62,7 +62,7 @@ export type CanvasNodeMetadata = {
     imageTaskModelConfigId?: number;
     imageTaskAuthIdentity?: string;
     videoTaskId?: string;
-    videoTaskStatus?: "queued" | "running" | "completed" | "failed" | "canceled" | "cancelled" | "expired";
+    videoTaskStatus?: "queued" | "running" | "completed" | "failed" | "expired";
     videoTaskModelConfigId?: number;
     videoTaskAuthIdentity?: string;
     groupId?: string;

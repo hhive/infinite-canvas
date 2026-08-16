@@ -35,6 +35,7 @@ export function CanvasNodePromptPanel({ node, isRunning, taskActive = isRunning,
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
+    const canStop = isRunning && mode !== "video";
     const config = buildNodeConfig(globalConfig, node, mode);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
@@ -109,18 +110,20 @@ export function CanvasNodePromptPanel({ node, isRunning, taskActive = isRunning,
                 <Button
                     type="primary"
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
-                    danger={isRunning}
-                    disabled={!isRunning && !prompt.trim()}
-                    onClick={() => (isRunning ? onStop(node.id) : submit())}
-                    aria-label={isRunning ? "停止生成" : "生成"}
+                    danger={canStop}
+                    disabled={(isRunning && !canStop) || (!isRunning && !prompt.trim())}
+                    onClick={() => (canStop ? onStop(node.id) : submit())}
+                    aria-label={canStop ? "停止生成" : isRunning ? "生成中" : "生成"}
                 >
                     <span className="flex items-center gap-1.5">
-                        {isRunning ? (
+                        {canStop ? (
                             <>
                                 <LoaderCircle className="size-4 animate-spin" />
                                 <Square className="size-3.5 fill-current" />
                                 <span className="text-xs font-medium">停止</span>
                             </>
+                        ) : isRunning ? (
+                            <LoaderCircle className="size-4 animate-spin" />
                         ) : (
                             <ArrowUp className="size-4" />
                         )}
