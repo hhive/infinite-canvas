@@ -742,6 +742,7 @@ function InfiniteCanvasPage() {
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : hoveredNodeId || (selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null);
+    const canvasTaskActive = hasActiveCanvasMediaTask(nodes, runningNodeId);
     const batchChildCountById = useMemo(() => {
         const map = new Map<string, number>();
         nodes.forEach((node) => {
@@ -2673,6 +2674,8 @@ function InfiniteCanvasPage() {
                                     <CanvasNodePromptPanel
                                         node={panelNode}
                                         isRunning={runningNodeId === panelNode.id || panelNode.metadata?.imageTaskStatus === "queued" || panelNode.metadata?.imageTaskStatus === "running"}
+                                        taskActive={canvasTaskActive}
+                                        active={activeNodeId === panelNode.id}
                                         mentionReferences={mentionReferencesByNodeId.get(panelNode.id) || []}
                                         onPromptChange={handleNodePromptChange}
                                         onConfigChange={handleConfigNodeChange}
@@ -2689,6 +2692,8 @@ function InfiniteCanvasPage() {
                                 <CanvasConfigNodePanel
                                     node={contentNode}
                                     isRunning={runningNodeId === contentNode.id || contentNode.metadata?.imageTaskStatus === "queued" || contentNode.metadata?.imageTaskStatus === "running"}
+                                    taskActive={canvasTaskActive}
+                                    active={activeNodeId === contentNode.id}
                                     inputSummary={getInputSummary(configInputsById.get(contentNode.id) || [])}
                                     onConfigChange={handleConfigNodeChange}
                                     onComposerToggle={() => setDialogNodeId((current) => (current === contentNode.id ? null : contentNode.id))}
@@ -2873,6 +2878,17 @@ function InfiniteCanvasPage() {
             </section>
         </main>
     );
+}
+
+export function hasActiveCanvasMediaTask(nodes: CanvasNodeData[], runningNodeId: string | null) {
+    if (runningNodeId) return true;
+    return nodes.some((node) => {
+        const hasStoredContent = Boolean(node.metadata?.content || node.metadata?.storageKey);
+        const imageStatus = node.metadata?.imageTaskStatus;
+        const videoStatus = node.metadata?.videoTaskStatus;
+        return imageStatus === "queued" || imageStatus === "running" || (imageStatus === "completed" && !hasStoredContent)
+            || videoStatus === "queued" || videoStatus === "running" || (videoStatus === "completed" && !hasStoredContent);
+    });
 }
 
 export function CanvasTopBar({

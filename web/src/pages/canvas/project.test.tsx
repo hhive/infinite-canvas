@@ -2,7 +2,8 @@ import { act, createElement, type ComponentProps, type ReactElement, type ReactN
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CanvasTopBar } from "@/pages/canvas/project";
+import { CanvasTopBar, hasActiveCanvasMediaTask } from "@/pages/canvas/project";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -115,5 +116,15 @@ describe("CanvasTopBar", () => {
         for (let index = 0; index < controls.length - 1; index += 1) {
             expect(controls[index].compareDocumentPosition(controls[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         }
+    });
+});
+
+describe("hasActiveCanvasMediaTask", () => {
+    it("keeps a completed task locked until its media content is stored", () => {
+        const recovering = [{ id: "image-1", type: CanvasNodeType.Image, metadata: { imageTaskStatus: "completed" } }] as CanvasNodeData[];
+        const stored = [{ id: "image-1", type: CanvasNodeType.Image, metadata: { imageTaskStatus: "completed", content: "https://example.test/image.png" } }] as CanvasNodeData[];
+
+        expect(hasActiveCanvasMediaTask(recovering, null)).toBe(true);
+        expect(hasActiveCanvasMediaTask(stored, null)).toBe(false);
     });
 });

@@ -3,6 +3,7 @@ import { ArrowUp, LoaderCircle, Square } from "lucide-react";
 import { Button } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
+import { MediaAPIKeyPicker } from "@/components/media-api-key-picker";
 import { defaultConfig, modelMatchesCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -19,6 +20,8 @@ export type CanvasNodeGenerationMode = CanvasGenerationMode;
 type CanvasNodePromptPanelProps = {
     node: CanvasNodeData;
     isRunning: boolean;
+    taskActive?: boolean;
+    active?: boolean;
     onPromptChange: (nodeId: string, prompt: string) => void;
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => void;
     onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => void;
@@ -27,7 +30,7 @@ type CanvasNodePromptPanelProps = {
     onImageSettingsOpenChange?: (open: boolean) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, taskActive = isRunning, active = true, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -71,6 +74,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
             />
+
+            {mode === "image" || mode === "video" ? <MediaAPIKeyPicker capability={mode} taskActive={taskActive} active={active} compact /> : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">

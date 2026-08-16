@@ -89,6 +89,7 @@ vi.mock("@/stores/use-workbench-agent-store", () => ({
 
 vi.mock("@/components/image-settings-panel", () => ({ ImageSettingsPanel: () => null }));
 vi.mock("@/components/model-picker", () => ({ ModelPicker: () => null }));
+vi.mock("@/components/media-api-key-picker", () => ({ MediaAPIKeyPicker: () => null }));
 vi.mock("@/components/prompts/prompt-select-dialog", () => ({ PromptSelectDialog: () => null }));
 vi.mock("@/components/canvas/asset-picker-modal", () => ({ AssetPickerModal: () => null }));
 
