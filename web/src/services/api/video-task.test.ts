@@ -48,7 +48,7 @@ describe("media video task API", () => {
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "video" }, withCredentials: true }));
         expect(axios.post).toHaveBeenCalledWith(
             "/v1/videos",
-            expect.objectContaining({ model: "media-video-create", model_config_id: 7, prompt: "ocean at dusk", reference_images: [], reference_videos: [], reference_audios: [] }),
+            expect.objectContaining({ model: "media-video-create", model_config_id: 7, prompt: "ocean at dusk", charge_mode: "per_request", generate_audio: true, watermark: false, reference_images: [], reference_videos: [], reference_audios: [] }),
             expect.objectContaining({ headers: { Authorization: "Bearer secret-key" }, withCredentials: true }),
         );
     });

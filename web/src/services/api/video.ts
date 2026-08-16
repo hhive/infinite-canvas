@@ -1,7 +1,7 @@
 import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
-import { boolConfig, isSeedanceVideoModel, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/lib/seedance-video";
+import { normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/lib/seedance-video";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
@@ -23,7 +23,7 @@ export type VideoGenerationTaskState =
     | { status: "failed"; task: VideoGenerationTask; error: string };
 
 type RequestOptions = { signal?: AbortSignal; onTask?: (task: VideoGenerationTask) => void | Promise<void> };
-type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[] };
+type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[]; supports_face?: boolean; charge_mode?: "per_request" | "per_second" };
 type UploadResponse = { upload_token?: string; token?: string; id?: string | number };
 type MediaVideoTask = {
     task_id?: string;
@@ -100,8 +100,9 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
                 seconds,
                 size: normalizeSeedanceRatio(config.size),
                 resolution: normalizeSeedanceResolution(config.vquality, model),
-                generate_audio: boolConfig(config.videoGenerateAudio, true),
-                watermark: isSeedanceVideoModel(model) ? false : boolConfig(config.videoWatermark, false),
+                charge_mode: modelConfig.charge_mode || "per_request",
+                generate_audio: true,
+                watermark: false,
                 reference_images: referenceImages,
                 reference_videos: referenceVideos,
                 reference_audios: referenceAudios,
