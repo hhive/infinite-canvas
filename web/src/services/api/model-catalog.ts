@@ -22,6 +22,8 @@ export type MarketplaceModel = {
     max_reference_audios?: number;
     supported_seconds?: number[];
     supported_resolutions?: string[];
+    resolution_prices?: Record<string, number>;
+    face_price?: number;
     supports_face?: boolean;
     charge_mode?: "cnt" | "second";
     calls: MarketplaceCall[];

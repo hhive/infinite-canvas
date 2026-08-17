@@ -57,9 +57,10 @@ beforeEach(async () => {
                     },
                     {
                         media_type: "video", name: "video-public", model_name: "video-public", display_name: "视频模型",
-                        price_quota: 2.5, max_reference_images: 4, max_reference_videos: 2, max_reference_audios: 1,
+                        resolution_prices: { "720p": 1.25, "1k": 1.75 }, face_price: 0.5,
+                        max_reference_images: 4, max_reference_videos: 2, max_reference_audios: 1,
                         supported_seconds: [4, 8], supported_resolutions: ["720p", "1k"],
-                        supports_face: true, charge_mode: "per_second", calls: [],
+                        supports_face: true, charge_mode: "second", calls: [],
                     },
                 ],
             },
@@ -105,6 +106,8 @@ describe("ModelsPage", () => {
         expect(container.textContent).not.toContain("支持尺寸/画幅");
         expect(container.textContent).toContain("支持人脸：支持");
         expect(container.textContent).toContain("计费方式：按秒");
-        expect(container.textContent).toContain("预扣价格：2.5 / 秒");
+        expect(container.textContent).toContain("分辨率预扣额度：720p 1.25 / 秒 · 1k 1.75 / 秒");
+        expect(container.textContent).toContain("卡脸附加预扣额度：0.5 / 秒");
+        expect(container.textContent).not.toContain("预扣价格：");
     });
 });
