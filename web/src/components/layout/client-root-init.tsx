@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { createModelChannel, modelOptionsFromChannels, useConfigStore } from "@/stores/use-config-store";
+import { createModelChannel, modelOptionsFromChannels, normalizeChannelModels, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { fetchChannelModels, probeImageSession } from "@/services/api/image";
 import { fetchMediaModels, type MediaCapability } from "@/services/api/media-models";
 import { readImageLaunchParams, resolveImageLaunchAuthentication } from "@/lib/image-launch-params";
@@ -60,9 +60,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             })
             .then((models) => {
                 if (!models) return;
-                const channels = [{ ...channel, models }, ...config.channels.slice(1)];
-                updateConfig("channels", channels);
-                updateConfig("models", modelOptionsFromChannels(channels));
+                useConfigStore.setState((state) => ({ config: mergeFetchedChannelModels(state.config, models) }));
                 if (apiKey) message.success(t("config.importedDirectConfig"));
             })
             .catch((error) => {
@@ -89,4 +87,15 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 
 export function shouldInitializeClientRoot(pathname: string): boolean {
     return pathname !== "/models";
+}
+
+export function mergeFetchedChannelModels(config: AiConfig, fetchedImageModels: string[]): AiConfig {
+    const firstChannel = config.channels[0] || createModelChannel({ id: "default" });
+    const retainedModels = normalizeChannelModels(firstChannel.models).filter((model) => model.capability !== "image");
+    const models = normalizeChannelModels([
+        ...retainedModels,
+        ...fetchedImageModels.map((name) => ({ name, capability: "image" as const })),
+    ]);
+    const channels = [{ ...firstChannel, models }, ...config.channels.slice(1)];
+    return { ...config, channels, models: modelOptionsFromChannels(channels) };
 }
