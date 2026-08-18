@@ -150,17 +150,13 @@ describe("media video task API", () => {
         await expect(pollVideoGenerationTask(config(task.model), task)).resolves.toEqual({ status: "failed", task: { ...task, status: "failed", pollAfterMs: undefined }, error: "upstream rejected" });
     });
 
-    it("reads completed content when the task has no result URL", async () => {
-        const blob = new Blob(["video"], { type: "video/mp4" });
-        vi.mocked(axios.get)
-            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "completed", model_config_id: 7, model: task.model } })
-            .mockResolvedValueOnce({ data: blob });
+    it("does not call the removed content endpoint when a completed task has no result URL", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: { task_id: "video-1", status: "completed", model_config_id: 7, model: task.model } });
 
-        const state = await pollVideoGenerationTask(config(task.model), task);
+        await expect(pollVideoGenerationTask(config(task.model), task)).rejects.toThrow("视频任务已完成但没有返回可播放地址");
 
-        expect(state.status).toBe("completed");
-        if (state.status === "completed") expect(state.result.blob).toBe(blob);
-        expect(axios.get).toHaveBeenLastCalledWith("/v1/videos/video-1/content", expect.objectContaining({ responseType: "blob", withCredentials: true }));
+        expect(axios.get).toHaveBeenCalledOnce();
+        expect(axios.get).not.toHaveBeenCalledWith(expect.stringContaining("/content"), expect.anything());
     });
 
 });

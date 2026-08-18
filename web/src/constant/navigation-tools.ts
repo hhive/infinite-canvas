@@ -19,7 +19,6 @@ export const navigationTools = [
     },
     {
         slug: "models",
-        label: "模型广场",
         icon: Boxes,
     },
     {

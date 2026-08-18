@@ -313,6 +313,7 @@ export default {
         image: "生图工作台",
         video: "视频创作台",
         prompts: "提示词库",
+        models: "模型广场",
         assets: "我的资产",
         config: "配置",
     },

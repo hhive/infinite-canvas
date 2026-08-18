@@ -36,7 +36,7 @@ type MediaVideoTask = {
     model: string;
     poll_after_ms?: number;
     error_message?: string;
-    result?: { url?: string; content_url?: string; mime_type?: string } | null;
+    result?: { url?: string; mime_type?: string } | null;
 };
 
 const VIDEO_PATH = "/v1/videos";
@@ -146,10 +146,8 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
         if (current.status === "queued" || current.status === "running") return { status: "pending", task: current };
         if (current.status !== "completed") return { status: "failed", task: current, error: response.data.error_message || terminalStatusMessage(current.status) };
         const result = response.data.result;
-        if (result?.url || result?.content_url) return { status: "completed", task: current, result: { url: result.url || result.content_url, mimeType: result.mime_type || "video/mp4" } };
-        const content = await axios.get<Blob>(`${VIDEO_PATH}/${encodeURIComponent(task.id)}/content`, { headers: sameOriginHeaders(requestConfig.apiKey), responseType: "blob", signal: options?.signal, withCredentials: true });
-        await assertVideoBlob(content.data);
-        return { status: "completed", task: current, result: { blob: content.data, mimeType: content.data.type || "video/mp4" } };
+        if (result?.url) return { status: "completed", task: current, result: { url: result.url, mimeType: result.mime_type || "video/mp4" } };
+        throw new Error("视频任务已完成但没有返回可播放地址");
     } catch (error) {
         throw new Error(readAxiosError(error, "视频任务查询失败"));
     }
@@ -286,11 +284,6 @@ function normalizeTask(payload: MediaVideoTask): VideoGenerationTask {
 function terminalStatusMessage(status: VideoTaskStatus) {
     if (status === "expired") return "视频任务已过期";
     return "视频生成失败";
-}
-
-async function assertVideoBlob(blob: Blob) {
-    if (!blob.size) throw new Error("视频内容为空");
-    if (blob.type && !blob.type.startsWith("video/") && blob.type !== "application/octet-stream") throw new Error("视频接口返回了非视频内容");
 }
 
 function readAxiosError(error: unknown, fallback: string) {

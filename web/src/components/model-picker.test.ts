@@ -8,7 +8,7 @@ import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock("@/components/ui/select", () => ({
-    Select: ({ children, onValueChange }: { children: ReactNode; onValueChange?: (value: string) => void }) =>
+    Select: ({ children, onOpenChange, onValueChange }: { children: ReactNode; onOpenChange?: (open: boolean) => void; onValueChange?: (value: string) => void }) =>
         createElement(
             "div",
             {
@@ -17,7 +17,7 @@ vi.mock("@/components/ui/select", () => ({
                     if (option?.dataset.value) onValueChange?.(option.dataset.value);
                 },
             },
-            children,
+            [createElement("span", { key: "open", "data-testid": "open-select", onClick: () => onOpenChange?.(true) }), children],
         ),
     SelectContent: ({ children, ...props }: { children: ReactNode } & ComponentProps<"div">) => createElement("div", { ...props, "data-testid": "select-content" }, children),
     SelectItem: ({ children, textValue, value }: { children: ReactNode; textValue?: string; value: string }) => createElement("div", { "data-text-value": textValue, "data-value": value }, children),
@@ -169,8 +169,8 @@ describe("ModelPicker", () => {
 
         const triggers = container.querySelectorAll("button");
         expect(triggers[0]?.title).toContain("Image After");
-        expect(triggers[1]?.title).toContain("Video After");
-        expect(triggers[1]?.title).toContain("9 / 次");
+        expect(triggers[1]?.title).toBe("Video After · Provider B");
+        expect(triggers[1]?.title).not.toContain("/ 次");
         expect(container.querySelector(`[data-value="${imageValue}"]`)?.getAttribute("data-text-value")).toContain("Image After");
         expect(container.querySelector(`[data-value="${videoValue}"]`)?.getAttribute("data-text-value")).toContain("Video After");
     });
@@ -187,11 +187,10 @@ describe("ModelPicker", () => {
 
         renderPicker({ config, value: `default::${model.model}`, capability: "video", onChange: vi.fn() });
 
-        const trigger = container.querySelector("button");
+        const trigger = container.querySelector<HTMLButtonElement>("button[title]");
         const responsiveWrapper = trigger?.querySelector(".canvas-model-picker-text");
         const layout = responsiveWrapper?.firstElementChild;
         const identity = layout?.children[0];
-        const price = layout?.children[1];
         const option = container.querySelector(`[data-value="default::${model.model}"]`);
 
         expect(responsiveWrapper?.classList.contains("flex")).toBe(false);
@@ -200,14 +199,14 @@ describe("ModelPicker", () => {
         expect(layout?.classList.contains("w-full")).toBe(true);
         expect(identity?.classList.contains("truncate")).toBe(true);
         expect(identity?.classList.contains("whitespace-nowrap")).toBe(true);
-        expect(price?.classList.contains("shrink-0")).toBe(true);
+        expect(layout?.children).toHaveLength(1);
         const content = container.querySelector('[data-testid="select-content"]');
         expect(content?.classList.contains("w-max")).toBe(true);
         expect(content?.classList.contains("max-w-[calc(100vw-24px)]")).toBe(true);
         expect(trigger?.classList.contains("data-[size=default]:h-auto")).toBe(true);
         expect(trigger?.classList.contains("items-start")).toBe(true);
-        expect(trigger?.title).toContain("12 / 次");
-        expect(option?.getAttribute("data-text-value")).toContain("12 / 次");
+        expect(trigger?.title).toBe("A very long video model name · OpenAI");
+        expect(option?.getAttribute("data-text-value")).toBe("A very long video model name · OpenAI");
     });
 
     it("keeps the placeholder in the responsive wrapper", () => {
@@ -218,7 +217,7 @@ describe("ModelPicker", () => {
         expect(placeholder?.classList.contains("truncate")).toBe(true);
     });
 
-    it("uses one bounded price label for extreme finite video prices", () => {
+    it("omits video prices regardless of whether the quota is zero or non-zero", () => {
         const model = { id: 2, mediaType: "video" as const, model: "video-extreme", displayName: "Extreme Video", providerName: "OpenAI", apiMode: "videos", priceQuota: Number.MAX_VALUE };
         const config = {
             ...defaultConfig,
@@ -230,37 +229,46 @@ describe("ModelPicker", () => {
 
         renderPicker({ config, value: `default::${model.model}`, capability: "video", onChange: vi.fn() });
 
-        const trigger = container.querySelector("button");
-        const visiblePrice = trigger?.querySelector(".canvas-model-picker-text")?.firstElementChild?.children[1]?.textContent || "";
+        const trigger = container.querySelector<HTMLButtonElement>("button[title]");
         const optionTextValue = container.querySelector(`[data-value="default::${model.model}"]`)?.getAttribute("data-text-value") || "";
 
-        expect(visiblePrice.length).toBeLessThan(32);
-        expect(visiblePrice).toMatch(/E\+?308 \/ 次$/i);
-        expect(trigger?.title.endsWith(visiblePrice)).toBe(true);
-        expect(optionTextValue.endsWith(visiblePrice)).toBe(true);
+        expect(trigger?.textContent).toContain("Extreme Video · OpenAI");
+        expect(trigger?.title).toBe("Extreme Video · OpenAI");
+        expect(optionTextValue).toBe("Extreme Video · OpenAI");
+    });
+
+    it("suppresses generic configuration only when the caller requests it", () => {
+        const onMissingConfig = vi.fn();
+        const emptyConfig = { ...defaultConfig, channels: [], models: [], videoModels: [] };
+
+        renderPicker({ config: emptyConfig, capability: "video", onChange: vi.fn(), onMissingConfig, suppressMissingConfigPrompt: true });
+        act(() => container.querySelector<HTMLElement>('[data-testid="open-select"]')?.click());
+
+        expect(onMissingConfig).not.toHaveBeenCalled();
+    });
+
+    it("keeps generic configuration fallback for media pickers by default", () => {
+        const onMissingConfig = vi.fn();
+        const emptyConfig = { ...defaultConfig, channels: [], models: [], imageModels: [] };
+
+        renderPicker({ config: emptyConfig, capability: "image", onChange: vi.fn(), onMissingConfig });
+        act(() => container.querySelector<HTMLElement>('[data-testid="open-select"]')?.click());
+
+        expect(onMissingConfig).toHaveBeenCalledOnce();
     });
 });
 
 describe("mediaModelLabel", () => {
-    it("shows the per-call price for video models", () => {
-        expect(mediaModelLabel([{ mediaType: "video", model: "video-1", displayName: "Video", providerName: "OpenAI", priceQuota: 12 }], "video-1")).toBe("Video · OpenAI · 12 / 次");
+    it("omits the per-call price for video models", () => {
+        expect(mediaModelLabel([{ mediaType: "video", model: "video-1", displayName: "Video", providerName: "OpenAI", priceQuota: 12 }], "video-1")).toBe("Video · OpenAI");
     });
 
-    it("shows the configured per-second price for video models", () => {
-        expect(mediaModelLabel([{ mediaType: "video", model: "seedance-2.5", displayName: "seedance-2.5", providerName: "Seedance", priceQuota: 0.39, chargeMode: "second" }], "seedance-2.5")).toBe("seedance-2.5 · Seedance · 0.39 / 秒");
+    it("omits the per-second price for video models", () => {
+        expect(mediaModelLabel([{ mediaType: "video", model: "seedance-2.5", displayName: "seedance-2.5", providerName: "Seedance", priceQuota: 0.39, chargeMode: "second" }], "seedance-2.5")).toBe("seedance-2.5 · Seedance");
     });
 
     it("keeps image model labels unchanged", () => {
         expect(mediaModelLabel([{ mediaType: "image", model: "image-1", displayName: "Image", providerName: "OpenAI", priceQuota: 12 }], "image-1")).toBe("Image · OpenAI");
     });
 
-    it("never displays negative zero", () => {
-        expect(mediaModelLabel([{ mediaType: "video", model: "video-1", displayName: "Video", providerName: "OpenAI", priceQuota: -0 }], "video-1")).not.toContain("-0 / 次");
-    });
-
-    it("bounds extreme finite prices while preserving their magnitude", () => {
-        const label = mediaModelLabel([{ mediaType: "video", model: "video-1", displayName: "Video", providerName: "OpenAI", priceQuota: Number.MAX_VALUE }], "video-1");
-        expect(label.length).toBeLessThan(80);
-        expect(label).toMatch(/E\+?308 \/ 次$/i);
-    });
 });

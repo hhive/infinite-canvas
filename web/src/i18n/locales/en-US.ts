@@ -313,6 +313,7 @@ export default {
         image: "Image Studio",
         video: "Video Studio",
         prompts: "Prompt Library",
+        models: "Model Marketplace",
         assets: "My Assets",
         config: "Settings",
     },

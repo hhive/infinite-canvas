@@ -14,11 +14,12 @@ type ModelPickerProps = {
     fullWidth?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
+    suppressMissingConfigPrompt?: boolean;
 };
 
 const EMPTY_MEDIA_MODELS: ReadonlyArray<MediaModelLabelData> = Object.freeze([]);
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, suppressMissingConfigPrompt = false }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
@@ -38,7 +39,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             open={open}
             value={current}
             onOpenChange={(nextOpen) => {
-                if (nextOpen && !options.length && config.channelMode === "local") onMissingConfig?.();
+                if (nextOpen && !options.length && config.channelMode === "local" && !suppressMissingConfigPrompt) onMissingConfig?.();
                 if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
                 setOpen(nextOpen);
             }}
@@ -96,7 +97,7 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability) {
     return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
 }
 
-type MediaModelLabelData = { mediaType: string; model: string; displayName: string; providerName: string; priceQuota: number; chargeMode?: "cnt" | "second" };
+type MediaModelLabelData = { mediaType: string; model: string; displayName: string; providerName: string; priceQuota?: number; chargeMode?: "cnt" | "second" };
 
 function ModelLabel({ config, model, mediaModels }: { config: AiConfig; model: string; mediaModels: ReadonlyArray<MediaModelLabelData> }) {
     return (
@@ -113,7 +114,6 @@ function ModelText({ config, model, mediaModels, className }: { config: AiConfig
     return (
         <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-left", className)}>
             <span className="min-w-0 flex-1 truncate whitespace-nowrap" title={identity}>{identity}</span>
-            {item?.mediaType === "video" ? <span className="shrink-0 whitespace-nowrap">{videoPriceLabel(item)}</span> : null}
         </span>
     );
 }
@@ -121,8 +121,7 @@ function ModelText({ config, model, mediaModels, className }: { config: AiConfig
 export function mediaModelLabel(models: ReadonlyArray<MediaModelLabelData>, option: string) {
     const item = findMediaModel(models, option);
     if (!item) return "";
-    const identity = mediaModelIdentity(item);
-    return item.mediaType === "video" ? `${identity} · ${videoPriceLabel(item)}` : identity;
+    return mediaModelIdentity(item);
 }
 
 function findMediaModel(models: ReadonlyArray<MediaModelLabelData>, option: string) {
@@ -132,17 +131,6 @@ function findMediaModel(models: ReadonlyArray<MediaModelLabelData>, option: stri
 
 function mediaModelIdentity(item: MediaModelLabelData) {
     return item.providerName ? `${item.displayName} · ${item.providerName}` : item.displayName;
-}
-
-function formatPriceQuota(priceQuota: number) {
-    const value = priceQuota === 0 ? 0 : priceQuota;
-    const formatted = new Intl.NumberFormat("zh-CN", { useGrouping: false, maximumFractionDigits: 6 }).format(value);
-    if (formatted.length <= 24) return formatted;
-    return new Intl.NumberFormat("zh-CN", { notation: "scientific", useGrouping: false, maximumFractionDigits: 6 }).format(value);
-}
-
-function videoPriceLabel(item: Pick<MediaModelLabelData, "priceQuota" | "chargeMode">) {
-    return `${formatPriceQuota(item.priceQuota)} / ${item.chargeMode === "second" ? "秒" : "次"}`;
 }
 
 function ModelIcon({ model }: { model: string }) {
