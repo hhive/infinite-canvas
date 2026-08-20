@@ -48,6 +48,7 @@ const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
 };
 
 export const IMAGE_UPLOAD_ACCEPT = Object.keys(IMAGE_MIME_BY_EXTENSION).join(",");
+export const GENERATED_IMAGE_STORAGE_TIMEOUT_MS = 15_000;
 
 export function imageMimeTypeFromFilename(filename: string) {
     const extension = filename.slice(filename.lastIndexOf(".")).toLowerCase();
@@ -83,6 +84,27 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     objectUrls.set(storageKey, url);
     const meta = await readImageMeta(url);
     return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: format.mimeType };
+}
+
+export async function uploadGeneratedImage(input: string | Blob, timeoutMs = GENERATED_IMAGE_STORAGE_TIMEOUT_MS): Promise<UploadedImage> {
+    const timeout = Math.max(1, Math.floor(timeoutMs));
+    const startedAt = performance.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        const uploaded = await Promise.race([
+            uploadImage(input),
+            new Promise<UploadedImage>((_, reject) => {
+                timer = setTimeout(() => reject(new Error("生成图片本地保存超时，请重试")), timeout);
+            }),
+        ]);
+        console.info("[canvas:image] local persistence completed", { elapsedMs: Math.round(performance.now() - startedAt), bytes: uploaded.bytes });
+        return uploaded;
+    } catch (error) {
+        console.warn("[canvas:image] local persistence failed", { elapsedMs: Math.round(performance.now() - startedAt), error: error instanceof Error ? error.message : String(error) });
+        throw error;
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
 }
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {

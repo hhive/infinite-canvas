@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const storage = vi.hoisted(() => new Map<string, Blob>());
+const setItemMock = vi.hoisted(() => vi.fn(async (key: string, value: Blob) => {
+    storage.set(key, value);
+    return value;
+}));
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
 const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00]);
@@ -11,10 +15,7 @@ const FORMAT_ERROR_MESSAGE = "图片格式无效，仅支持有效的 PNG、JPEG
 vi.mock("localforage", () => ({
     default: {
         createInstance: () => ({
-            setItem: vi.fn(async (key: string, value: Blob) => {
-                storage.set(key, value);
-                return value;
-            }),
+            setItem: setItemMock,
             getItem: vi.fn(async (key: string) => storage.get(key) ?? null),
             removeItem: vi.fn(async (key: string) => storage.delete(key)),
             iterate: vi.fn(async () => undefined),
@@ -25,7 +26,7 @@ vi.mock("localforage", () => ({
 vi.mock("nanoid", () => ({ nanoid: () => "fixed-id" }));
 vi.mock("@/lib/image-utils", () => ({ readImageMeta: vi.fn(async () => ({ width: 2, height: 3, mimeType: "image/jpeg" })) }));
 
-import { getImageBlob, IMAGE_UPLOAD_ACCEPT, imageMimeTypeFromFilename, imageToDataUrl, setImageBlob, uploadImage } from "@/services/image-storage";
+import { getImageBlob, IMAGE_UPLOAD_ACCEPT, imageMimeTypeFromFilename, imageToDataUrl, setImageBlob, uploadGeneratedImage, uploadImage } from "@/services/image-storage";
 
 function readAsDataUrl(blob: Blob) {
     return new Promise<string>((resolve, reject) => {
@@ -39,6 +40,7 @@ function readAsDataUrl(blob: Blob) {
 describe("image storage MIME normalization", () => {
     beforeEach(() => {
         storage.clear();
+        setItemMock.mockClear();
         const objectUrlBlobs = new Map<string, Blob>();
         let objectUrlIndex = 0;
         vi.stubGlobal("URL", {
@@ -69,6 +71,13 @@ describe("image storage MIME normalization", () => {
         expect(stored?.type).toBe("image/jpeg");
         expect(stored?.size).toBe(input.size);
         expect((await readAsDataUrl(stored as Blob)).split(",")[1]).toBe(originalDataUrl.split(",")[1]);
+    });
+
+    it("fails generated-image persistence within a bounded time", async () => {
+        const input = new File([PNG_BYTES], "generated.png", { type: "image/png" });
+        setItemMock.mockImplementationOnce(() => new Promise<Blob>(() => undefined));
+
+        await expect(uploadGeneratedImage(input, 5)).rejects.toThrow("生成图片本地保存超时");
     });
 
     it.each([

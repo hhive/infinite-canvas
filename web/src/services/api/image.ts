@@ -136,6 +136,7 @@ export async function probeImageSession(apiKey = "") {
 export async function waitForImageTask(task: ImageTask, apiKey: string, options?: ImageTaskRequestOptions) {
     let current = task;
     let transientFailures = 0;
+    const startedAt = performance.now();
     await options?.onTask?.(current);
     while (current.status === "queued" || current.status === "running") {
         const delay = Math.max(500, Math.min(15000, current.poll_after_ms || 10000));
@@ -161,7 +162,10 @@ export async function waitForImageTask(task: ImageTask, apiKey: string, options?
         }
     }
     if (current.status !== "completed") throw new Error(current.error_message || `图片任务已${current.status === "canceled" ? "取消" : current.status === "expired" ? "过期" : "失败"}`);
-    return parseImagePayload(current.result || {});
+    const parseStartedAt = performance.now();
+    const images = parseImagePayload(current.result || {});
+    console.info("[canvas:image] task completed", { taskId: current.task_id, pollElapsedMs: Math.round(parseStartedAt - startedAt), parseElapsedMs: Math.round(performance.now() - parseStartedAt), imageCount: images.length });
+    return images;
 }
 
 export async function resumeImageTask(taskId: string, apiKey = "", options?: ImageTaskRequestOptions) {
