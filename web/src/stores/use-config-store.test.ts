@@ -14,6 +14,7 @@ beforeEach(() => {
         mediaModelStatus: { image: "idle", video: "idle" },
         mediaModelErrors: { image: "", video: "" },
         mediaModelsRefreshedAt: { image: "", video: "" },
+        cookieSessionReady: false,
     });
 });
 
@@ -40,6 +41,34 @@ describe("configured model capabilities", () => {
         };
 
         expect(resolveModelForCapability(config, "default::custom-alpha", "video")).toBe("default::custom-alpha");
+    });
+});
+
+describe("cookie session readiness", () => {
+    it("accepts a verified cookie session without a persisted API key", () => {
+        const state = useConfigStore.getState();
+        const config = {
+            ...state.config,
+            channels: state.config.channels.map((channel) => ({ ...channel, apiKey: "" })),
+            model: "default::gpt-image-2",
+        };
+
+        useConfigStore.setState({ cookieSessionReady: true });
+
+        expect(state.isAiConfigReady(config, config.model)).toBe(true);
+    });
+
+    it("does not accept an unverified cookie session without a persisted API key", () => {
+        const state = useConfigStore.getState();
+        const config = {
+            ...state.config,
+            channels: state.config.channels.map((channel) => ({ ...channel, apiKey: "" })),
+            model: "default::gpt-image-2",
+        };
+
+        useConfigStore.setState({ cookieSessionReady: false });
+
+        expect(state.isAiConfigReady(config, config.model)).toBe(false);
     });
 });
 

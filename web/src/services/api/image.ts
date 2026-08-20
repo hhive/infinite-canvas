@@ -913,7 +913,22 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
 }
 
 export async function fetchChannelModels(channel: ModelChannel) {
+    if (channel.apiFormat === "gemini") return fetchGeminiChannelModels(channel);
     return fetchImageModels({ baseUrl: channel.baseUrl, apiKey: channel.apiKey, apiFormat: channel.apiFormat });
+}
+
+async function fetchGeminiChannelModels(channel: ModelChannel) {
+    try {
+        const response = await axios.get<GeminiPayload>(geminiApiUrl({ baseUrl: channel.baseUrl, model: "" }), { headers: geminiHeaders({ apiKey: channel.apiKey }), withCredentials: true });
+        const models = response.data?.models
+            ?.map((item) => geminiModelName(item.name || ""))
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b)) || [];
+        if (!models.length) throw new Error("Gemini 模型接口返回格式无效");
+        return Array.from(new Set(models));
+    } catch (error) {
+        throw new Error(readAxiosError(error, "读取 Gemini 模型失败"));
+    }
 }
 
 const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "model" | "systemPrompt"> = {

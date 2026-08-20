@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeFetchedChannelModels, shouldInitializeClientRoot } from "@/components/layout/client-root-init";
+import { cookieSessionReadiness, mergeFetchedChannelModels, shouldInitializeClientRoot } from "@/components/layout/client-root-init";
 import { defaultConfig, selectableModelsByCapability } from "@/stores/use-config-store";
 
 describe("shouldInitializeClientRoot", () => {
@@ -24,5 +24,13 @@ describe("shouldInitializeClientRoot", () => {
 
         expect(selectableModelsByCapability(merged, "video")).toEqual([`default::${videoModel.model}`]);
         expect(merged.videoModel).toBe(`default::${videoModel.model}`);
+    });
+});
+
+describe("cookieSessionReadiness", () => {
+    it("accepts only a successful probe without a bearer key", () => {
+        expect(cookieSessionReadiness(true, "")).toBe(true);
+        expect(cookieSessionReadiness(true, "sk-manual")).toBe(false);
+        expect(cookieSessionReadiness(false, "")).toBe(false);
     });
 });

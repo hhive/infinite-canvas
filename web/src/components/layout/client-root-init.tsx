@@ -19,6 +19,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const config = useConfigStore((state) => state.config);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const clearAPIKeys = useConfigStore((state) => state.clearAPIKeys);
+    const setCookieSessionReady = useConfigStore((state) => state.setCookieSessionReady);
     const applyMediaModels = useConfigStore((state) => state.applyMediaModels);
     const setMediaModelsError = useConfigStore((state) => state.setMediaModelsError);
     const setMediaModelsLoading = useConfigStore((state) => state.setMediaModelsLoading);
@@ -33,6 +34,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         window.history.replaceState(null, "", cleanUrl);
         const firstChannel = config.channels[0];
         const authentication = resolveImageLaunchAuthentication({ apiKey, sub2apiLaunch }, firstChannel?.apiKey || "");
+        setCookieSessionReady(false);
         if (authentication.clearPersistedAPIKeys) clearAPIKeys();
         const authenticationKey = authentication.apiKey;
         updateConfig(
@@ -52,6 +54,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         const channel = { ...(firstChannel || createModelChannel({ id: "default", name: t("config.channels.defaultName") })), apiKey: authenticationKey };
         void probeImageSession(authenticationKey)
             .then((ready) => {
+                setCookieSessionReady(cookieSessionReadiness(ready, authenticationKey));
                 if (!ready) {
                     openConfigDialog(false);
                     return;
@@ -80,13 +83,17 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     setMediaModelsError(capability, error instanceof Error ? error.message : "读取媒体模型失败", status === 401);
                 });
         }
-    }, [applyMediaModels, clearAPIKeys, config.channels, message, openConfigDialog, setMediaModelsError, setMediaModelsLoading, t, updateConfig]);
+    }, [applyMediaModels, clearAPIKeys, config.channels, message, openConfigDialog, setCookieSessionReady, setMediaModelsError, setMediaModelsLoading, t, updateConfig]);
 
     return <>{children}</>;
 }
 
 export function shouldInitializeClientRoot(pathname: string): boolean {
     return pathname !== "/models";
+}
+
+export function cookieSessionReadiness(probeSucceeded: boolean, authenticationKey: string) {
+    return probeSucceeded && !authenticationKey.trim();
 }
 
 export function mergeFetchedChannelModels(config: AiConfig, fetchedImageModels: string[]): AiConfig {

@@ -110,6 +110,18 @@ describe("image session readiness", () => {
     });
 });
 
+describe("channel model discovery", () => {
+    it("uses the Gemini v1beta models endpoint for Gemini channels", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: { models: [{ name: "models/gemini-2.5-flash" }, { name: "models/gemini-2.5-flash" }] } });
+
+        await expect(fetchChannelModels({ id: "gemini", name: "Gemini", baseUrl: "https://generativelanguage.googleapis.com", apiKey: "gemini-key", apiFormat: "gemini", models: [] })).resolves.toEqual(["gemini-2.5-flash"]);
+        expect(axios.get).toHaveBeenCalledWith("https://generativelanguage.googleapis.com/v1beta/models", {
+            headers: { "x-goog-api-key": "gemini-key", "Content-Type": "application/json" },
+            withCredentials: true,
+        });
+    });
+});
+
 describe("image edit task payload", () => {
     it("submits the public model name with references and a mask", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList("gpt-image-2") });

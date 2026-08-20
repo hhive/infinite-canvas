@@ -137,6 +137,7 @@ type ConfigStore = {
     isConfigOpen: boolean;
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
+    cookieSessionReady: boolean;
     mediaModels: Record<MediaCapability, MediaModel[]>;
     mediaModelStatus: Record<MediaCapability, "idle" | "loading" | "ready" | "error">;
     mediaModelErrors: Record<MediaCapability, string>;
@@ -144,6 +145,7 @@ type ConfigStore = {
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
+    setCookieSessionReady: (ready: boolean) => void;
     openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
@@ -213,9 +215,9 @@ export function resolveModelScript(config: AiConfig, value: string) {
     return findChannelModel(config, value)?.model.script?.trim() || "";
 }
 
-function isAiConfigReady(config: AiConfig, model: string) {
+function isAiConfigReady(config: AiConfig, model: string, cookieSessionReady = false) {
     const channel = resolveModelChannel(config, model);
-    return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
+    return Boolean(model.trim() && channel.baseUrl.trim() && (channel.apiKey.trim() || cookieSessionReady));
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -226,6 +228,7 @@ export const useConfigStore = create<ConfigStore>()(
             isConfigOpen: false,
             configTab: "channels",
             shouldPromptContinue: false,
+            cookieSessionReady: false,
             mediaModels: { image: [], video: [] },
             mediaModelStatus: { image: "idle", video: "idle" },
             mediaModelErrors: { image: "", video: "" },
@@ -244,7 +247,8 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
-            isAiConfigReady: (config, model) => isAiConfigReady(config, model),
+            isAiConfigReady: (config, model) => isAiConfigReady(config, model, get().cookieSessionReady),
+            setCookieSessionReady: (cookieSessionReady) => set({ cookieSessionReady }),
             openConfigDialog: (shouldPromptContinue = false, configTab = "channels") => set({ isConfigOpen: true, shouldPromptContinue, configTab }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
