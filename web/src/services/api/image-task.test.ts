@@ -67,6 +67,23 @@ describe("scripted image model", () => {
 });
 
 describe("image task cancellation boundaries", () => {
+    it("polls immediately when a background page becomes visible", async () => {
+        vi.useFakeTimers();
+        Object.defineProperty(document, "hidden", { configurable: true, value: true });
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: { ...runningTask, status: "completed", result: { data: [{ b64_json: "aW1hZ2U=" }] } } });
+
+        const pending = waitForImageTask({ ...runningTask, poll_after_ms: 10_000 }, "");
+        await Promise.resolve();
+        expect(axios.get).not.toHaveBeenCalled();
+
+        Object.defineProperty(document, "hidden", { configurable: true, value: false });
+        document.dispatchEvent(new Event("visibilitychange"));
+        await expect(pending).resolves.toHaveLength(1);
+        expect(axios.get).toHaveBeenCalledOnce();
+
+        vi.useRealTimers();
+    });
+
     it("explicit cancellation calls the server cancel endpoint", async () => {
         vi.mocked(axios.post).mockResolvedValue({ data: { ...runningTask, status: "canceled" } });
         await cancelImageTask("task-1", "sk-test");

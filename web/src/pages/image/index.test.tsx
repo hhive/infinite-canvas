@@ -215,6 +215,36 @@ describe("ImagePage reference uploads", () => {
         expect(container.textContent).toContain("1280x720");
     });
 
+    it("shows the completed server result before local persistence finishes", async () => {
+        let finishPersistence!: (value: { url: string; storageKey: string; width: number; height: number; bytes: number; mimeType: string }) => void;
+        uploadGeneratedImage.mockReturnValueOnce(new Promise((resolve) => {
+            finishPersistence = resolve;
+        }));
+        const textarea = container.querySelector<HTMLTextAreaElement>("textarea");
+        const generateButton = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.includes("开始生成"));
+
+        await act(async () => {
+            if (textarea) {
+                Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, "立即展示结果");
+                textarea.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+        });
+        await act(async () => {
+            generateButton?.click();
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(container.querySelector('img[src^="data:image/png;base64,"]')).toBeTruthy();
+        expect(container.textContent).not.toContain("生成中");
+
+        await act(async () => {
+            finishPersistence({ url: "blob:persisted", storageKey: "image:persisted", width: 1280, height: 720, bytes: PNG_BYTES.byteLength, mimeType: "image/png" });
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+    });
+
     it("uses the exact extension accept list on the real file input", () => {
         const input = container.querySelector<HTMLInputElement>('input[type="file"]');
         expect(input).toBeTruthy();

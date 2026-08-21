@@ -141,11 +141,23 @@ export async function waitForImageTask(task: ImageTask, apiKey: string, options?
     while (current.status === "queued" || current.status === "running") {
         const delay = Math.max(500, Math.min(15000, current.poll_after_ms || 10000));
         await new Promise<void>((resolve, reject) => {
-            const timer = window.setTimeout(resolve, delay);
+            const wakeOnVisible = () => {
+                if (!document.hidden) {
+                    window.clearTimeout(timer);
+                    document.removeEventListener("visibilitychange", wakeOnVisible);
+                    resolve();
+                }
+            };
+            const timer = window.setTimeout(() => {
+                document.removeEventListener("visibilitychange", wakeOnVisible);
+                resolve();
+            }, delay);
+            document.addEventListener("visibilitychange", wakeOnVisible);
             options?.signal?.addEventListener(
                 "abort",
                 () => {
                     window.clearTimeout(timer);
+                    document.removeEventListener("visibilitychange", wakeOnVisible);
                     reject(new DOMException("本地轮询已停止", "AbortError"));
                 },
                 { once: true },
