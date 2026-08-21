@@ -1,4 +1,4 @@
-import { act, createElement, type ComponentProps, type MouseEvent, type ReactNode } from "react";
+import { act, createElement, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,22 +7,17 @@ import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("@/components/ui/select", () => ({
-    Select: ({ children, onOpenChange, onValueChange }: { children: ReactNode; onOpenChange?: (open: boolean) => void; onValueChange?: (value: string) => void }) =>
-        createElement(
-            "div",
-            {
-                onClick: (event: MouseEvent<HTMLDivElement>) => {
-                    const option = (event.target as HTMLElement).closest<HTMLElement>("[data-value]");
-                    if (option?.dataset.value) onValueChange?.(option.dataset.value);
-                },
-            },
-            [createElement("span", { key: "open", "data-testid": "open-select", onClick: () => onOpenChange?.(true) }), children],
-        ),
-    SelectContent: ({ children, ...props }: { children: ReactNode } & ComponentProps<"div">) => createElement("div", { ...props, "data-testid": "select-content" }, children),
-    SelectItem: ({ children, textValue, value }: { children: ReactNode; textValue?: string; value: string }) => createElement("div", { "data-text-value": textValue, "data-value": value }, children),
-    SelectTrigger: ({ children, ...props }: ComponentProps<"button">) => createElement("button", props, children),
-}));
+vi.mock("antd", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("antd")>();
+    return {
+        ...actual,
+        Popover: ({ children, content, onOpenChange }: { children: ReactNode; content: ReactNode; onOpenChange?: (open: boolean) => void }) => createElement("div", null, [
+            createElement("span", { key: "open", "data-testid": "open-select", onClick: () => onOpenChange?.(true) }),
+            createElement("div", { key: "trigger" }, children),
+            createElement("div", { key: "content", "data-testid": "select-content" }, content),
+        ]),
+    };
+});
 
 let container: HTMLDivElement;
 let root: Root;
@@ -46,6 +41,16 @@ afterEach(() => {
 
 function renderPicker(props: ComponentProps<typeof ModelPicker>) {
     act(() => root.render(createElement(ModelPicker, props)));
+}
+
+function searchModels(keyword: string) {
+    const input = container.querySelector<HTMLInputElement>('[aria-label="搜索模型"]');
+    expect(input).toBeTruthy();
+    act(() => {
+        if (!input) return;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, keyword);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
 }
 
 const configuredTextModel = "default::gpt-5.5";
@@ -115,7 +120,7 @@ describe("ModelPicker", () => {
             useConfigStore.setState({ configTab: "models" });
         });
 
-        const triggers = container.querySelectorAll("button");
+        const triggers = container.querySelectorAll<HTMLButtonElement>("button[title]");
         expect(triggers).toHaveLength(2);
         expect(triggers[0]?.title).toContain("gpt-5.5");
         expect(triggers[1]?.title).toContain("gpt-4o-mini-tts");
@@ -155,8 +160,8 @@ describe("ModelPicker", () => {
                 ]),
             );
         });
-        expect(container.querySelectorAll("button")[0]?.title).toContain("Image Before");
-        expect(container.querySelectorAll("button")[1]?.title).toContain("Video Before");
+        expect(container.querySelectorAll<HTMLButtonElement>("button[title]")[0]?.title).toContain("Image Before");
+        expect(container.querySelectorAll<HTMLButtonElement>("button[title]")[1]?.title).toContain("Video Before");
 
         act(() => {
             useConfigStore.setState({
@@ -167,7 +172,7 @@ describe("ModelPicker", () => {
             });
         });
 
-        const triggers = container.querySelectorAll("button");
+        const triggers = container.querySelectorAll<HTMLButtonElement>("button[title]");
         expect(triggers[0]?.title).toContain("Image After");
         expect(triggers[1]?.title).toBe("Video After · Provider B");
         expect(triggers[1]?.title).not.toContain("/ 次");
@@ -201,9 +206,8 @@ describe("ModelPicker", () => {
         expect(identity?.classList.contains("whitespace-nowrap")).toBe(true);
         expect(layout?.children).toHaveLength(1);
         const content = container.querySelector('[data-testid="select-content"]');
-        expect(content?.classList.contains("w-max")).toBe(true);
-        expect(content?.classList.contains("max-w-[calc(100vw-24px)]")).toBe(true);
-        expect(trigger?.classList.contains("data-[size=default]:h-auto")).toBe(true);
+        expect(content?.querySelector('[role="listbox"]')).toBeTruthy();
+        expect(trigger?.getAttribute("aria-haspopup")).toBe("listbox");
         expect(trigger?.classList.contains("items-start")).toBe(true);
         expect(trigger?.title).toBe("A very long video model name · OpenAI");
         expect(option?.getAttribute("data-text-value")).toBe("A very long video model name · OpenAI");
@@ -255,6 +259,75 @@ describe("ModelPicker", () => {
         act(() => container.querySelector<HTMLElement>('[data-testid="open-select"]')?.click());
 
         expect(onMissingConfig).toHaveBeenCalledOnce();
+    });
+
+    it("filters media models by display name, real model name, and provider", () => {
+        const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+            callback(0);
+            return 1;
+        });
+        const models = [
+            { id: 21, mediaType: "image" as const, model: "gpt-image-2", displayName: "旗舰生图", providerName: "OpenAI", apiMode: "images", priceQuota: 1 },
+            { id: 22, mediaType: "image" as const, model: "seedream-4-5", displayName: "即梦 4.5", providerName: "火山方舟", apiMode: "images", priceQuota: 2 },
+        ];
+        const config = {
+            ...defaultConfig,
+            channels: [{ ...defaultConfig.channels[0], models: models.map((model) => ({ name: model.model, capability: "image" as const })) }],
+            models: models.map((model) => `default::${model.model}`),
+            imageModels: models.map((model) => `default::${model.model}`),
+        };
+        useConfigStore.setState({ mediaModels: { image: models, video: [] } });
+
+        renderPicker({ config, value: "default::gpt-image-2", capability: "image", onChange: vi.fn() });
+
+        act(() => container.querySelector<HTMLElement>('[data-testid="open-select"]')?.click());
+        expect(document.activeElement).toBe(container.querySelector('[aria-label="搜索模型"]'));
+
+        searchModels("旗舰");
+        expect(container.querySelector('[data-value="default::gpt-image-2"]')).toBeTruthy();
+        expect(container.querySelector('[data-value="default::seedream-4-5"]')).toBeNull();
+
+        searchModels("seedream");
+        expect(container.querySelector('[data-value="default::seedream-4-5"]')?.textContent).toContain("seedream-4-5");
+        expect(container.querySelector('[data-value="default::gpt-image-2"]')).toBeNull();
+
+        searchModels("OPENAI");
+        expect(container.querySelector('[data-value="default::gpt-image-2"]')).toBeTruthy();
+        expect(container.querySelector('[data-value="default::seedream-4-5"]')).toBeNull();
+        requestFrame.mockRestore();
+    });
+
+    it("shows an empty search state and keeps keyboard selection values compatible", () => {
+        const onChange = vi.fn();
+        const scrollIntoView = vi.fn();
+        Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+        const secondTextModel = "default::gpt-4.1-mini";
+        const config = {
+            ...configuredTextAndAudioConfig(),
+            channels: [{ ...defaultConfig.channels[0], models: [{ name: "gpt-5.5", capability: "text" as const }, { name: "gpt-4.1-mini", capability: "text" as const }] }],
+            models: [configuredTextModel, secondTextModel],
+            textModels: [configuredTextModel, secondTextModel],
+        };
+
+        renderPicker({ config, value: configuredTextModel, capability: "text", onChange });
+
+        act(() => container.querySelector<HTMLElement>('[data-testid="open-select"]')?.click());
+        const input = container.querySelector<HTMLInputElement>('[aria-label="搜索模型"]');
+        expect(input?.getAttribute("role")).toBe("combobox");
+        expect(input?.getAttribute("aria-controls")).toBe(container.querySelector('[role="listbox"]')?.id);
+        expect(input?.getAttribute("aria-activedescendant")).toBe(container.querySelector('[role="option"]')?.id);
+
+        searchModels("missing-model");
+        expect(container.querySelector('[role="status"]')?.textContent).toBe("没有匹配的模型");
+
+        searchModels("");
+        input?.focus();
+        act(() => input?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+        expect(input?.getAttribute("aria-activedescendant")).toBe(container.querySelectorAll('[role="option"]')[1]?.id);
+        act(() => input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+
+        expect(onChange).toHaveBeenCalledWith(secondTextModel);
     });
 });
 

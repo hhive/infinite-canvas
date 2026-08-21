@@ -23,7 +23,10 @@ vi.mock("antd", () => ({
     Button: ({ children, icon, ...props }: ComponentProps<"button"> & { icon?: ReactNode }) => createElement("button", props, icon, children),
     Card: ({ children, title, onClick }: { children?: ReactNode; title?: ReactNode; onClick?: () => void }) => createElement("article", { onClick }, title, children),
     Empty: ({ description }: { description?: ReactNode }) => createElement("div", null, description),
+    Input: (props: ComponentProps<"input">) => createElement("input", props),
     Modal: ({ children, open, title }: { children?: ReactNode; open?: boolean; title?: ReactNode }) => (open ? createElement("section", { "data-testid": "model-modal" }, title, children) : null),
+    Segmented: ({ options, value, onChange, ...props }: { options: Array<{ label: string; value: string }>; value: string; onChange: (value: string) => void; [key: string]: unknown }) => createElement("div", props, options.map((option) => createElement("button", { key: option.value, type: "button", "aria-pressed": value === option.value, onClick: () => onChange(option.value) }, option.label))),
+    Select: ({ options, value, onChange, ...props }: { options: Array<{ label: string; value: string }>; value: string; onChange: (value: string) => void; [key: string]: unknown }) => createElement("select", { ...props, value, onChange: (event: Event) => onChange((event.target as HTMLSelectElement).value) }, options.map((option) => createElement("option", { key: option.value, value: option.value }, option.label))),
     Spin: () => createElement("div", null, "loading"),
     Tag: ({ children, className }: { children?: ReactNode; className?: string }) => createElement("span", { className }, children),
 }));
@@ -31,12 +34,20 @@ vi.mock("antd", () => ({
 vi.mock("lucide-react", () => ({
     Copy: () => createElement("span"),
     ExternalLink: () => createElement("span"),
+    RotateCcw: () => createElement("span"),
+    Search: () => createElement("span"),
 }));
 
 import ModelsPage from "@/pages/models";
 
 let container: HTMLDivElement;
 let root: Root;
+
+function changeValue(element: HTMLInputElement | HTMLSelectElement, value: string) {
+    const prototype = element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLSelectElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(element, value);
+    element.dispatchEvent(new Event(element instanceof HTMLInputElement ? "input" : "change", { bubbles: true }));
+}
 
 beforeEach(async () => {
     fetchModelCatalog.mockResolvedValue({
@@ -52,15 +63,25 @@ beforeEach(async () => {
                         name: "image-public",
                         model_name: "image-public",
                         display_name: "完整显示名称",
+                        provider: "OpenAI",
                         note: "这是需要完整换行展示的公开模型备注，不应该被截断。",
                         calls: [{ label: "同步生成", method: "POST", path: "/v1/images/generations", example: longCallExample, auth: "Bearer" }],
                     },
                     {
-                        media_type: "video", name: "video-public", model_name: "video-public", display_name: "视频模型",
+                        media_type: "video", name: "video-public", model_name: "video-public", display_name: "视频模型", provider: "Google",
                         resolution_prices: { "720p": 1.25, "1k": 1.75 }, face_price: 0.5,
                         max_reference_images: 4, max_reference_videos: 2, max_reference_audios: 1,
                         supported_seconds: [4, 8], supported_resolutions: ["720p", "1k"],
                         supports_face: true, charge_mode: "second", calls: [],
+                    },
+                ],
+            },
+            {
+                id: 2,
+                name: "创意模型",
+                models: [
+                    {
+                        media_type: "image", name: "flux-public", model_name: "flux-public", display_name: "Flux 绘图", provider: "Black Forest Labs", calls: [],
                     },
                 ],
             },
@@ -109,5 +130,59 @@ describe("ModelsPage", () => {
         expect(container.textContent).toContain("分辨率预扣额度：720p 1.25 / 秒 · 1k 1.75 / 秒");
         expect(container.textContent).toContain("卡脸附加预扣额度：0.5 / 秒");
         expect(container.textContent).not.toContain("预扣价格：");
+    });
+
+    it("filters by trimmed case-insensitive keyword, media type and provider while hiding empty groups", () => {
+        const search = container.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]');
+        expect(search).toBeTruthy();
+
+        act(() => changeValue(search!, "  VIDEO-PUBLIC  "));
+        expect(container.textContent).toContain("视频模型");
+        expect(container.textContent).not.toContain("完整显示名称");
+        expect(container.textContent).not.toContain("创意模型");
+        expect(container.textContent).toContain("当前命中 1 / 共 3 个模型");
+
+        act(() => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "图片")?.click());
+        expect(container.textContent).toContain("没有符合当前筛选条件的模型");
+
+        act(() => changeValue(search!, ""));
+        const provider = container.querySelector<HTMLSelectElement>('select[aria-label="供应商筛选"]');
+        act(() => changeValue(provider!, "Black Forest Labs"));
+        expect(container.textContent).toContain("Flux 绘图");
+        expect(container.textContent).not.toContain("图片模型");
+        expect(container.textContent).toContain("当前命中 1 / 共 3 个模型");
+    });
+
+    it("clears active filters and restores all models", () => {
+        const search = container.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]');
+        act(() => changeValue(search!, "missing"));
+        expect(container.textContent).toContain("没有符合当前筛选条件的模型");
+
+        act(() => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "清空筛选")?.click());
+
+        expect(search?.value).toBe("");
+        expect(container.textContent).toContain("完整显示名称");
+        expect(container.textContent).toContain("视频模型");
+        expect(container.textContent).toContain("Flux 绘图");
+        expect(container.textContent).toContain("当前命中 3 / 共 3 个模型");
+    });
+
+    it("keeps request failures separate from disabled state and retries loading", async () => {
+        act(() => root.unmount());
+        root = createRoot(container);
+        fetchModelCatalog.mockReset();
+        fetchModelCatalog.mockRejectedValueOnce(new Error("catalog unavailable")).mockResolvedValueOnce({ enabled: false, fields: [], groups: [] });
+
+        await act(async () => root.render(createElement(ModelsPage)));
+
+        expect(container.textContent).toContain("模型广场加载失败");
+        expect(container.textContent).toContain("catalog unavailable");
+        expect(container.textContent).not.toContain("模型广场暂未开放");
+
+        await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "重试")?.click());
+
+        expect(fetchModelCatalog).toHaveBeenCalledTimes(2);
+        expect(container.textContent).toContain("模型广场暂未开放");
+        expect(container.textContent).not.toContain("模型广场加载失败");
     });
 });
