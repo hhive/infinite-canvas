@@ -73,11 +73,24 @@ describe("image storage MIME normalization", () => {
         expect((await readAsDataUrl(stored as Blob)).split(",")[1]).toBe(originalDataUrl.split(",")[1]);
     });
 
-    it("fails generated-image persistence within a bounded time", async () => {
+    it("warns about slow generated-image persistence without turning it into a failure", async () => {
+        vi.useFakeTimers();
+        const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
         const input = new File([PNG_BYTES], "generated.png", { type: "image/png" });
-        setItemMock.mockImplementationOnce(() => new Promise<Blob>(() => undefined));
+        let finishPersistence!: (blob: Blob) => void;
+        setItemMock.mockImplementationOnce((_key: string, value: Blob) => new Promise<Blob>((resolve) => {
+            finishPersistence = () => resolve(value);
+        }));
 
-        await expect(uploadGeneratedImage(input, 5)).rejects.toThrow("生成图片本地保存超时");
+        const pending = uploadGeneratedImage(input, 5);
+        await vi.advanceTimersByTimeAsync(5);
+        expect(warning).toHaveBeenCalledWith("[canvas:image] local persistence slow", expect.objectContaining({ thresholdMs: 5 }));
+
+        finishPersistence(input);
+        await expect(pending).resolves.toMatchObject({ bytes: input.size, mimeType: "image/png" });
+
+        warning.mockRestore();
+        vi.useRealTimers();
     });
 
     it.each([

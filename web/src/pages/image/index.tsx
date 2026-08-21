@@ -18,7 +18,7 @@ import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "
 import { cancelImageTask, prepareImageEditReferences, requestEdit, requestGeneration, resumeImageTask, type ImageTask, type ImageTaskStatus } from "@/services/api/image";
 import { mediaModelDisplayName } from "@/services/api/media-models";
 import { canResumeImageTask, imageTaskAuthIdentity, readImageWorkbenchTasks, removeImageWorkbenchTask, resolveImageTaskCancel, resumeImageWorkbenchRecord, saveImageWorkbenchTask, type ImageWorkbenchTaskRecord } from "@/services/image-task-storage";
-import { deleteStoredImages, IMAGE_UPLOAD_ACCEPT, INVALID_IMAGE_FORMAT_MESSAGE, isInvalidImageFormatError, resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
+import { deleteStoredImages, IMAGE_UPLOAD_ACCEPT, INVALID_IMAGE_FORMAT_MESSAGE, isInvalidImageFormatError, resolveImageUrl, uploadGeneratedImage, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ReferenceImage } from "@/types/image";
@@ -146,7 +146,7 @@ export default function ImagePage() {
             const savedImage = await resumeImageWorkbenchRecord(record, {
                 resumeTask: (taskId, onTask) => resumeImageTask(taskId, effectiveConfig.apiKey, { signal: controller.signal, onTask }),
                 saveAsset: async (image) => {
-                    const stored = await uploadImage(image.dataUrl);
+                    const stored = await uploadGeneratedImage(image.dataUrl);
                     return { id: image.id, url: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                 },
                 saveRecord: saveImageWorkbenchTask,
@@ -416,9 +416,8 @@ export default function ImagePage() {
             const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, { signal: controller.signal, onTask }) : await requestGeneration(snapshot.config, snapshot.text, { signal: controller.signal, onTask });
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
-            const meta = await readImageMeta(image.dataUrl);
-            const stored = await uploadImage(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: stored.url, storageKey: stored.storageKey, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: stored.bytes, mimeType: stored.mimeType };
+            const stored = await uploadGeneratedImage(image.dataUrl);
+            const nextImage = { id: image.id, dataUrl: stored.url, storageKey: stored.storageKey, durationMs: performance.now() - itemStartedAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
             setResults((value) => updateResultAt(value, index, { status: "success", taskStatus: "completed", image: nextImage }));
             const storedRecord = (await readImageWorkbenchTasks()).find((record) => record.slotId === slotId);
             if (storedRecord) await saveImageWorkbenchTask({ ...storedRecord, status: "completed", landingStage: "assets_saved", savedImage: { id: image.id, url: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType } });
