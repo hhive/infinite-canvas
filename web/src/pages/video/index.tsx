@@ -15,7 +15,7 @@ import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceEmptyHint, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
-import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
+import { createVideoGenerationTask, pollVideoGenerationTask, previewGeneratedVideo, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { mediaModelDisplayName } from "@/services/api/media-models";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
@@ -323,7 +323,7 @@ export default function VideoPage() {
             for (let attempt = 0; attempt < 120; attempt += 1) {
                 const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
                 if (state.status === "completed") {
-                    const stored = await storeGeneratedVideo(state.result);
+                    const stored = previewGeneratedVideo(state.result);
                     const nextVideo: GeneratedVideo = {
                         id: nanoid(),
                         url: stored.url,
@@ -335,8 +335,13 @@ export default function VideoPage() {
                         mimeType: stored.mimeType,
                     };
                     setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
-                    await saveLog({ ...log, status: "成功", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
                     message.success("视频已生成");
+                    void saveLog({ ...log, status: "成功", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
+                    void storeGeneratedVideo(state.result).then(async (persisted) => {
+                        const persistedVideo = { ...nextVideo, url: persisted.url, storageKey: persisted.storageKey, width: persisted.width || nextVideo.width, height: persisted.height || nextVideo.height, bytes: persisted.bytes, mimeType: persisted.mimeType };
+                        setResults([{ id: persistedVideo.id, status: "success", video: persistedVideo }]);
+                        await saveLog({ ...log, status: "成功", durationMs: persistedVideo.durationMs, video: persistedVideo, error: undefined });
+                    }).catch((error) => console.warn("[canvas:video] local persistence failed", { taskId: log.task?.id, error: error instanceof Error ? error.message : String(error) }));
                     return;
                 }
                 if (state.status === "failed") throw new Error(state.error);
@@ -877,5 +882,18 @@ function normalizeResolution(value: string) {
 }
 
 function delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise<void>((resolve) => {
+        const wakeOnVisible = () => {
+            if (!document.hidden) {
+                window.clearTimeout(timer);
+                document.removeEventListener("visibilitychange", wakeOnVisible);
+                resolve();
+            }
+        };
+        const timer = window.setTimeout(() => {
+            document.removeEventListener("visibilitychange", wakeOnVisible);
+            resolve();
+        }, ms);
+        document.addEventListener("visibilitychange", wakeOnVisible);
+    });
 }

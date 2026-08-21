@@ -176,6 +176,12 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     throw new Error("视频接口没有返回可播放的视频");
 }
 
+export function previewGeneratedVideo(result: VideoGenerationResult): UploadedFile {
+    if (result.blob) return { url: URL.createObjectURL(result.blob), storageKey: "", bytes: result.blob.size, mimeType: result.mimeType || result.blob.type || "video/mp4" };
+    if (result.url) return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
+    throw new Error("视频接口没有返回可播放的视频");
+}
+
 async function createPluginVideoTask(config: AiConfig, model: string, script: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
     if (!config.baseUrl.trim()) throw new Error("请先配置 API 地址");
     if (!config.apiKey.trim()) throw new Error("请先配置 API Key");
@@ -297,9 +303,21 @@ function readAxiosError(error: unknown, fallback: string) {
 
 function delay(ms: number, signal?: AbortSignal) {
     return new Promise<void>((resolve, reject) => {
-        const timer = window.setTimeout(resolve, ms);
+        const wakeOnVisible = () => {
+            if (!document.hidden) {
+                window.clearTimeout(timer);
+                document.removeEventListener("visibilitychange", wakeOnVisible);
+                resolve();
+            }
+        };
+        const timer = window.setTimeout(() => {
+            document.removeEventListener("visibilitychange", wakeOnVisible);
+            resolve();
+        }, ms);
+        document.addEventListener("visibilitychange", wakeOnVisible);
         signal?.addEventListener("abort", () => {
             window.clearTimeout(timer);
+            document.removeEventListener("visibilitychange", wakeOnVisible);
             reject(new DOMException("本地轮询已停止", "AbortError"));
         }, { once: true });
     });
