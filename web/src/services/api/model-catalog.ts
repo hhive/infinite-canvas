@@ -3,6 +3,7 @@ import axios from "axios";
 export type MarketplaceCall = { label: string; method: string; path: string; example: string; auth: string };
 export type MarketplaceModel = {
     media_type: "image" | "video";
+    sort_order?: number;
     name: string;
     model_name?: string;
     display_name?: string;

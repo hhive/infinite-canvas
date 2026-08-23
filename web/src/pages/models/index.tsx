@@ -1,5 +1,5 @@
 import { Copy, ExternalLink, RotateCcw, Search } from "lucide-react";
-import { App, Button, Card, Empty, Input, Modal, Segmented, Select, Spin, Tag } from "antd";
+import { App, Button, Empty, Input, Modal, Segmented, Select, Spin, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchModelCatalog, imagePricingRows, type MarketplaceModel, type MarketplaceResponse } from "@/services/api/model-catalog";
@@ -37,6 +37,41 @@ function modelName(model: MarketplaceModel) {
     return model.model_name?.trim() || model.name;
 }
 
+export type ModelSortKey = "sort_order" | "model_name" | "price" | "media_type" | "provider" | "group";
+export type ModelSortState = { key: ModelSortKey; direction: "asc" | "desc" };
+
+export function modelPrice(model: MarketplaceModel): number | undefined {
+    const values = model.media_type === "image"
+        ? imagePricingRows(model).map((row) => row.price)
+        : [...Object.values(model.resolution_prices ?? {}), model.face_price];
+    const valid = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+    return valid.length ? Math.min(...valid) : undefined;
+}
+
+export function sortMarketplaceModels(rows: Array<{ model: MarketplaceModel; groupName: string }>, state: ModelSortState) {
+    const direction = state.direction === "asc" ? 1 : -1;
+    const text = (value: unknown) => String(value ?? "").toLocaleLowerCase("zh-CN");
+    const compare = (left: typeof rows[number], right: typeof rows[number]) => {
+        let result = 0;
+        if (state.key === "sort_order") result = (left.model.sort_order ?? 0) - (right.model.sort_order ?? 0);
+        if (state.key === "model_name") result = text(modelName(left.model)).localeCompare(text(modelName(right.model)), "zh-CN");
+        if (state.key === "price") {
+            const lp = modelPrice(left.model), rp = modelPrice(right.model);
+            if (lp === undefined && rp !== undefined) result = 1;
+            else if (lp !== undefined && rp === undefined) result = -1;
+            else result = (lp ?? 0) - (rp ?? 0);
+        }
+        if (state.key === "media_type") result = text(left.model.media_type).localeCompare(text(right.model.media_type), "zh-CN");
+        if (state.key === "provider") result = text(left.model.provider).localeCompare(text(right.model.provider), "zh-CN");
+        if (state.key === "group") result = text(left.groupName).localeCompare(text(right.groupName), "zh-CN");
+        if (result !== 0) return result * direction;
+        const nameResult = text(modelName(left.model)).localeCompare(text(modelName(right.model)), "zh-CN");
+        if (nameResult !== 0) return nameResult;
+        return text(left.groupName).localeCompare(text(right.groupName), "zh-CN");
+    };
+    return [...rows].sort(compare);
+}
+
 function ModelNames({ model }: { model: MarketplaceModel }) {
     return (
         <div className="min-w-0 flex-1">
@@ -64,6 +99,7 @@ export default function ModelsPage() {
     const [keyword, setKeyword] = useState("");
     const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
     const [providerFilter, setProviderFilter] = useState("");
+    const [sortState, setSortState] = useState<ModelSortState>({ key: "sort_order", direction: "asc" });
 
     useEffect(() => {
         const controller = new AbortController();
@@ -93,24 +129,26 @@ export default function ModelsPage() {
     const providers = useMemo(() => Array.from(new Set(data?.groups.flatMap((group) => group.models.map((model) => model.provider?.trim()).filter((provider): provider is string => Boolean(provider))) ?? [])).sort((left, right) => left.localeCompare(right, "zh-CN")), [data]);
     const totalModels = useMemo(() => data?.groups.reduce((count, group) => count + group.models.length, 0) ?? 0, [data]);
     const normalizedKeyword = keyword.trim().toLocaleLowerCase();
+    const filteredRows = useMemo(() => sortMarketplaceModels(data?.groups.flatMap((group) => group.models.filter((model) => {
+        if (mediaFilter !== "all" && model.media_type !== mediaFilter) return false;
+        if (providerFilter && model.provider?.trim() !== providerFilter) return false;
+        if (!normalizedKeyword) return true;
+        const mediaLabel = model.media_type === "image" ? "图片 image" : "视频 video";
+        return [displayName(model), modelName(model), model.name, model.provider, mediaLabel].some((value) => value?.toLocaleLowerCase().includes(normalizedKeyword));
+    }).map((model) => ({ model, groupName: group.name }))) ?? [], sortState), [data, mediaFilter, normalizedKeyword, providerFilter, sortState]);
     const filteredGroups = useMemo(() => data?.groups.map((group) => ({
         ...group,
-        models: group.models.filter((model) => {
-            if (mediaFilter !== "all" && model.media_type !== mediaFilter) return false;
-            if (providerFilter && model.provider?.trim() !== providerFilter) return false;
-            if (!normalizedKeyword) return true;
-            const mediaLabel = model.media_type === "image" ? "图片 image" : "视频 video";
-            return [displayName(model), modelName(model), model.name, model.provider, mediaLabel]
-                .some((value) => value?.toLocaleLowerCase().includes(normalizedKeyword));
-        }),
-    })).filter((group) => group.models.length > 0) ?? [], [data, mediaFilter, normalizedKeyword, providerFilter]);
-    const matchedModels = filteredGroups.reduce((count, group) => count + group.models.length, 0);
+        models: filteredRows.filter((row) => row.groupName === group.name).map((row) => row.model),
+    })).filter((group) => group.models.length > 0) ?? [], [data, filteredRows]);
+    const matchedModels = filteredRows.length;
     const hasFilters = Boolean(normalizedKeyword || providerFilter || mediaFilter !== "all");
     const clearFilters = () => {
         setKeyword("");
         setMediaFilter("all");
         setProviderFilter("");
     };
+    const toggleSort = (key: ModelSortKey) => setSortState((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" });
+    const sortLabel = (key: ModelSortKey, label: string) => <button type="button" className="font-semibold" aria-label={`按${label}排序`} aria-sort={sortState.key === key ? (sortState.direction === "asc" ? "ascending" : "descending") : "none"} onClick={() => toggleSort(key)}>{label} {sortState.key === key ? (sortState.direction === "asc" ? "↑" : "↓") : "↕"}</button>;
 
     if (loading) return <div className="flex h-full items-center justify-center"><Spin /></div>;
     if (loadError) return <div className="flex h-full items-center justify-center px-4"><div className="text-center"><Empty description="模型广场加载失败" /><p className="mb-4 break-words text-sm text-stone-500 dark:text-stone-400">{loadError}</p><Button icon={<RotateCcw className="size-4" />} onClick={() => setRetryKey((value) => value + 1)}>重试</Button></div></div>;
@@ -132,23 +170,7 @@ export default function ModelsPage() {
                     </div>
                     <div className="text-sm text-stone-500 dark:text-stone-400">当前命中 {matchedModels} / 共 {totalModels} 个模型</div>
                 </div>
-                {filteredGroups.map((group) => (
-                    <section key={group.id} className="mb-10">
-                        <div className="mb-4 flex items-center gap-3"><h2 className="text-xl font-semibold">{group.name}</h2><Tag>{group.models.length} 个模型</Tag></div>
-                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                            {group.models.map((model) => (
-                                <Card key={`${group.id}-${model.media_type}-${modelName(model)}`} hoverable onClick={() => setSelected(model)} title={<div className="flex items-start justify-between gap-2"><ModelNames model={model} /><Tag className="shrink-0" color={model.media_type === "image" ? "blue" : "purple"}>{model.media_type === "image" ? "图片" : "视频"}</Tag></div>}>
-                                    <div className="space-y-2 text-sm">
-                                        {hasField("provider") ? <div className="break-words text-stone-500">{model.provider || "未注明供应商"}</div> : null}
-                                        {model.note?.trim() ? <p className="whitespace-pre-wrap break-words text-stone-600 dark:text-stone-300">{model.note.trim()}</p> : null}
-                                        {model.media_type === "image" ? <>{hasField("sizes") && model.sizes?.length ? <div>尺寸：{model.sizes.join(" / ")}</div> : null}{hasField("qualities") && model.qualities?.length ? <div>质量：{model.qualities.join(" / ")}</div> : null}{hasField("prices") ? <>{priceText(model, resolutionLabels) ? <div>分辨率价格：{priceText(model, resolutionLabels)}</div> : null}{priceText(model, qualityLabels) ? <div>质量价格：{priceText(model, qualityLabels)}</div> : null}{priceText(model, resolutionLabels) && priceText(model, qualityLabels) ? <div className="text-xs text-stone-500">分辨率和质量同时传入时，按两者中较高价格计费。</div> : null}</> : null}</> : <>{hasField("video_capabilities") ? <><div>参考素材：{model.max_reference_images || 0} 图 / {model.max_reference_videos || 0} 视频 / {model.max_reference_audios || 0} 音频</div><div>支持秒数：{model.supported_seconds?.join(" / ") || "-"}</div><div>支持分辨率：{model.supported_resolutions?.join(" / ") || "-"}</div><div>支持人脸：{model.supports_face === false ? "不支持" : "支持"}</div><div>计费方式：{model.charge_mode === "second" ? "按秒" : "按条"}</div></> : null}{hasField("prices") ? <>{videoResolutionPriceText(model) ? <div>分辨率预扣额度：{videoResolutionPriceText(model)}</div> : null}{model.supports_face === true ? <div>卡脸附加预扣额度：{quota(model.face_price)} / {model.charge_mode === "second" ? "秒" : "条"}</div> : null}</> : null}</>}
-                                        <div className="flex items-center gap-1 pt-2 text-xs text-stone-500"><ExternalLink className="size-3.5" />点击查看 API 调用说明</div>
-                                    </div>
-                                </Card>
-                            ))}
-                        </div>
-                    </section>
-                ))}
+                {filteredRows.length > 0 ? <div className="overflow-x-auto rounded-md border border-stone-200 dark:border-stone-800"><table className="w-full min-w-[900px] text-left text-sm"><thead className="border-b border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"><tr><th className="px-4 py-3">{sortLabel("sort_order", "排序")}</th><th className="px-4 py-3">{sortLabel("model_name", "模型名")}</th><th className="px-4 py-3">{sortLabel("price", "价格")}</th><th className="px-4 py-3">{sortLabel("media_type", "类型")}</th><th className="px-4 py-3">{sortLabel("provider", "供应商")}</th><th className="px-4 py-3">{sortLabel("group", "分组")}</th></tr></thead><tbody>{filteredRows.map(({ model, groupName }) => <tr key={`${groupName}-${model.media_type}-${modelName(model)}`} className="cursor-pointer border-b border-stone-100 hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900" onClick={() => setSelected(model)}><td className="px-4 py-3">{model.sort_order ?? 0}</td><td className="px-4 py-3"><ModelNames model={model} />{model.note?.trim() ? <p className="mt-2 whitespace-pre-wrap break-words text-stone-600 dark:text-stone-300">{model.note.trim()}</p> : null}{model.media_type === "video" ? <div className="mt-2 text-xs text-stone-500">参考素材：{model.max_reference_images || 0} 图 / {model.max_reference_videos || 0} 视频 / {model.max_reference_audios || 0} 音频<br />支持秒数：{model.supported_seconds?.join(" / ") || "-"}<br />支持分辨率：{model.supported_resolutions?.join(" / ") || "-"}<br />支持人脸：{model.supports_face === false ? "不支持" : "支持"}<br />计费方式：{model.charge_mode === "second" ? "按秒" : "按条"}</div> : null}</td><td className="px-4 py-3">{modelPrice(model) === undefined ? "-" : money(modelPrice(model))}{model.media_type === "video" && videoResolutionPriceText(model) ? <div className="text-xs text-stone-500">分辨率预扣额度：{videoResolutionPriceText(model)}</div> : null}{model.media_type === "video" && model.supports_face === true ? <div className="text-xs text-stone-500">卡脸附加预扣额度：{quota(model.face_price)} / {model.charge_mode === "second" ? "秒" : "条"}</div> : null}</td><td className="px-4 py-3"><Tag color={model.media_type === "image" ? "blue" : "purple"}>{model.media_type === "image" ? "图片" : "视频"}</Tag></td><td className="px-4 py-3">{model.provider || "未注明供应商"}</td><td className="px-4 py-3">{groupName}</td></tr>)}</tbody></table></div> : null}
                 {totalModels === 0 ? <Empty description="暂无可展示模型" /> : null}
                 {totalModels > 0 && matchedModels === 0 ? <div className="py-12 text-center"><Empty description="没有符合当前筛选条件的模型" />{hasFilters ? <Button className="mt-4" icon={<RotateCcw className="size-4" />} onClick={clearFilters}>清空筛选</Button> : null}</div> : null}
             </div>
