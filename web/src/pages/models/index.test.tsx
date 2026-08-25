@@ -100,6 +100,16 @@ afterEach(() => {
 });
 
 describe("ModelsPage", () => {
+    it("renders marketplace cards under their Sub2API group headings", () => {
+        const imageGroup = container.querySelector('[data-testid="marketplace-group-1"]');
+        const creativeGroup = container.querySelector('[data-testid="marketplace-group-2"]');
+        expect(imageGroup?.textContent).toContain("图片模型");
+        expect(imageGroup?.textContent).toContain("2 个模型");
+        expect(imageGroup?.textContent).toContain("完整显示名称");
+        expect(creativeGroup?.textContent).toContain("创意模型");
+        expect(creativeGroup?.textContent).toContain("Flux 绘图");
+    });
+
     it("splits video models that support both billing modes and annotates examples", () => {
         const [count, second] = expandMarketplaceModels({
             media_type: "video", name: "dual-video", charge_modes: ["cnt", "second"],
