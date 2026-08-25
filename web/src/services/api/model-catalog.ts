@@ -27,6 +27,7 @@ export type MarketplaceModel = {
     face_price?: number;
     supports_face?: boolean;
     charge_mode?: "cnt" | "second";
+    charge_modes?: Array<"cnt" | "second">;
     calls: MarketplaceCall[];
 };
 export type MarketplaceGroup = { id: number; name: string; models: MarketplaceModel[] };

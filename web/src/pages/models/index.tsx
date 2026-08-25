@@ -37,6 +37,20 @@ function modelName(model: MarketplaceModel) {
     return model.model_name?.trim() || model.name;
 }
 
+export function expandMarketplaceModels(model: MarketplaceModel): MarketplaceModel[] {
+    if (model.media_type !== "video" || !model.charge_modes?.length) return [model];
+    const modes = [...new Set(model.charge_modes)].filter((mode) => mode === "cnt" || mode === "second");
+    return modes.length > 1 ? modes.map((charge_mode) => ({ ...model, charge_mode, calls: model.calls.map((call) => ({ ...call, example: addChargeMode(call.example, charge_mode) })) })) : [model];
+}
+
+function addChargeMode(example: string, mode: "cnt" | "second") {
+    if (/charge_mode\s*[=:]/i.test(example)) return example.replace(/(charge_mode\s*[=:]\s*["']?)(cnt|second)/i, `$1${mode}`);
+    if (example.trim().startsWith("{")) {
+        try { return JSON.stringify({ ...(JSON.parse(example) as Record<string, unknown>), charge_mode: mode }, null, 2); } catch { /* preserve non-JSON examples */ }
+    }
+    return `${example.trimEnd()}\n# charge_mode: ${mode}`;
+}
+
 export type ModelSortKey = "sort_order" | "model_name" | "price" | "media_type" | "provider" | "group";
 export type ModelSortState = { key: ModelSortKey; direction: "asc" | "desc" };
 
@@ -127,19 +141,20 @@ export default function ModelsPage() {
     };
     const hasField = (field: string) => data?.fields.includes(field) ?? true;
     const providers = useMemo(() => Array.from(new Set(data?.groups.flatMap((group) => group.models.map((model) => model.provider?.trim()).filter((provider): provider is string => Boolean(provider))) ?? [])).sort((left, right) => left.localeCompare(right, "zh-CN")), [data]);
-    const totalModels = useMemo(() => data?.groups.reduce((count, group) => count + group.models.length, 0) ?? 0, [data]);
+    const catalogGroups = useMemo(() => data?.groups.map((group) => ({ ...group, models: group.models.flatMap(expandMarketplaceModels) })) ?? [], [data]);
+    const totalModels = useMemo(() => catalogGroups.reduce((count, group) => count + group.models.length, 0), [catalogGroups]);
     const normalizedKeyword = keyword.trim().toLocaleLowerCase();
-    const filteredRows = useMemo(() => sortMarketplaceModels(data?.groups.flatMap((group) => group.models.filter((model) => {
+    const filteredRows = useMemo(() => sortMarketplaceModels(catalogGroups.flatMap((group) => group.models.filter((model) => {
         if (mediaFilter !== "all" && model.media_type !== mediaFilter) return false;
         if (providerFilter && model.provider?.trim() !== providerFilter) return false;
         if (!normalizedKeyword) return true;
         const mediaLabel = model.media_type === "image" ? "图片 image" : "视频 video";
         return [displayName(model), modelName(model), model.name, model.provider, mediaLabel].some((value) => value?.toLocaleLowerCase().includes(normalizedKeyword));
-    }).map((model) => ({ model, groupName: group.name }))) ?? [], sortState), [data, mediaFilter, normalizedKeyword, providerFilter, sortState]);
-    const filteredGroups = useMemo(() => data?.groups.map((group) => ({
+    }).map((model) => ({ model, groupName: group.name }))), sortState), [catalogGroups, mediaFilter, normalizedKeyword, providerFilter, sortState]);
+    const filteredGroups = useMemo(() => catalogGroups.map((group) => ({
         ...group,
         models: filteredRows.filter((row) => row.groupName === group.name).map((row) => row.model),
-    })).filter((group) => group.models.length > 0) ?? [], [data, filteredRows]);
+    })).filter((group) => group.models.length > 0), [catalogGroups, filteredRows]);
     const matchedModels = filteredRows.length;
     const hasFilters = Boolean(normalizedKeyword || providerFilter || mediaFilter !== "all");
     const clearFilters = () => {
@@ -170,7 +185,7 @@ export default function ModelsPage() {
                     </div>
                     <div className="text-sm text-stone-500 dark:text-stone-400">当前命中 {matchedModels} / 共 {totalModels} 个模型</div>
                 </div>
-                {filteredRows.length > 0 ? <div className="overflow-x-auto rounded-md border border-stone-200 dark:border-stone-800"><table className="w-full min-w-[900px] text-left text-sm"><thead className="border-b border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-900"><tr><th className="px-4 py-3">{sortLabel("sort_order", "排序")}</th><th className="px-4 py-3">{sortLabel("model_name", "模型名")}</th><th className="px-4 py-3">{sortLabel("price", "价格")}</th><th className="px-4 py-3">{sortLabel("media_type", "类型")}</th><th className="px-4 py-3">{sortLabel("provider", "供应商")}</th><th className="px-4 py-3">{sortLabel("group", "分组")}</th></tr></thead><tbody>{filteredRows.map(({ model, groupName }) => <tr key={`${groupName}-${model.media_type}-${modelName(model)}`} className="cursor-pointer border-b border-stone-100 hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900" onClick={() => setSelected(model)}><td className="px-4 py-3">{model.sort_order ?? 0}</td><td className="px-4 py-3"><ModelNames model={model} />{model.note?.trim() ? <p className="mt-2 whitespace-pre-wrap break-words text-stone-600 dark:text-stone-300">{model.note.trim()}</p> : null}{model.media_type === "video" ? <div className="mt-2 text-xs text-stone-500">参考素材：{model.max_reference_images || 0} 图 / {model.max_reference_videos || 0} 视频 / {model.max_reference_audios || 0} 音频<br />支持秒数：{model.supported_seconds?.join(" / ") || "-"}<br />支持分辨率：{model.supported_resolutions?.join(" / ") || "-"}<br />支持人脸：{model.supports_face === false ? "不支持" : "支持"}<br />计费方式：{model.charge_mode === "second" ? "按秒" : "按条"}</div> : null}</td><td className="px-4 py-3">{modelPrice(model) === undefined ? "-" : money(modelPrice(model))}{model.media_type === "video" && videoResolutionPriceText(model) ? <div className="text-xs text-stone-500">分辨率预扣额度：{videoResolutionPriceText(model)}</div> : null}{model.media_type === "video" && model.supports_face === true ? <div className="text-xs text-stone-500">卡脸附加预扣额度：{quota(model.face_price)} / {model.charge_mode === "second" ? "秒" : "条"}</div> : null}</td><td className="px-4 py-3"><Tag color={model.media_type === "image" ? "blue" : "purple"}>{model.media_type === "image" ? "图片" : "视频"}</Tag></td><td className="px-4 py-3">{model.provider || "未注明供应商"}</td><td className="px-4 py-3">{groupName}</td></tr>)}</tbody></table></div> : null}
+                {filteredRows.length > 0 ? <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{filteredRows.map(({ model, groupName }) => <article key={`${groupName}-${model.media_type}-${modelName(model)}-${model.charge_mode || "default"}`} className="cursor-pointer rounded-md border border-stone-200 bg-white p-4 transition hover:border-stone-400 dark:border-stone-800 dark:bg-stone-950 dark:hover:border-stone-600" onClick={() => setSelected(model)}><div className="mb-3 flex items-start justify-between gap-3"><ModelNames model={model} /><Tag color={model.media_type === "image" ? "blue" : "purple"}>{model.media_type === "image" ? "图片" : "视频"}</Tag></div>{model.note?.trim() ? <p className="mb-3 whitespace-pre-wrap break-words text-sm text-stone-600 dark:text-stone-300">{model.note.trim()}</p> : null}{model.media_type === "video" ? <div className="mb-3 text-xs text-stone-500">参考素材：{model.max_reference_images || 0} 图 / {model.max_reference_videos || 0} 视频 / {model.max_reference_audios || 0} 音频<br />支持秒数：{model.supported_seconds?.join(" / ") || "-"}<br />支持分辨率：{model.supported_resolutions?.join(" / ") || "-"}<br />支持人脸：{model.supports_face === false ? "不支持" : "支持"}<br />计费方式：{model.charge_mode === "second" ? "按秒" : "按条"}</div> : null}<div className="text-sm font-medium">{modelPrice(model) === undefined ? "-" : money(modelPrice(model))}{model.media_type === "video" && videoResolutionPriceText(model) ? <div className="text-xs font-normal text-stone-500">分辨率预扣额度：{videoResolutionPriceText(model)}</div> : null}{model.media_type === "video" && model.supports_face === true ? <div className="text-xs font-normal text-stone-500">卡脸附加预扣额度：{quota(model.face_price)} / {model.charge_mode === "second" ? "秒" : "条"}</div> : null}</div><div className="mt-3 text-xs text-stone-500">{model.provider || "未注明供应商"} · {groupName}</div></article>)}</div> : null}
                 {totalModels === 0 ? <Empty description="暂无可展示模型" /> : null}
                 {totalModels > 0 && matchedModels === 0 ? <div className="py-12 text-center"><Empty description="没有符合当前筛选条件的模型" />{hasFilters ? <Button className="mt-4" icon={<RotateCcw className="size-4" />} onClick={clearFilters}>清空筛选</Button> : null}</div> : null}
             </div>

@@ -181,6 +181,18 @@ describe("media video task API", () => {
         await expect(pollVideoGenerationTask(config(task.model), task)).resolves.toEqual({ status: "failed", task: { ...task, status: "failed", pollAfterMs: undefined }, error: "upstream rejected" });
     });
 
+    it("uses the backend timeout instead of a fixed polling attempt limit", async () => {
+        vi.useFakeTimers();
+        const createdAt = new Date(Date.now() - 1000).toISOString();
+        vi.mocked(axios.get)
+            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "running", model_config_id: 7, model: task.model, poll_after_ms: 500, timeout_seconds: 3, created_at: createdAt } })
+            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "completed", model_config_id: 7, model: task.model, result: { url: "https://media.example.test/result.mp4" }, timeout_seconds: 3, created_at: createdAt } });
+        const pending = resumeVideoGenerationTask(config(task.model), task);
+        await vi.advanceTimersByTimeAsync(500);
+        await expect(pending).resolves.toEqual({ url: "https://media.example.test/result.mp4", mimeType: "video/mp4" });
+        expect(axios.get).toHaveBeenCalledTimes(2);
+    });
+
     it("does not call the removed content endpoint when a completed task has no result URL", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: { task_id: "video-1", status: "completed", model_config_id: 7, model: task.model } });
 

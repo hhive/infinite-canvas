@@ -18,6 +18,8 @@ export type VideoGenerationTask = {
     model: string;
     status: VideoTaskStatus;
     pollAfterMs?: number;
+    timeoutSeconds?: number;
+    createdAt?: string;
     provider?: "media" | "plugin";
 };
 export type VideoGenerationTaskState =
@@ -26,7 +28,7 @@ export type VideoGenerationTaskState =
     | { status: "failed"; task: VideoGenerationTask; error: string };
 
 type RequestOptions = { signal?: AbortSignal; onTask?: (task: VideoGenerationTask) => void | Promise<void> };
-type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[]; supported_resolutions?: string[]; supports_face?: boolean; charge_mode?: "cnt" | "second" };
+type VideoModel = { id: number; model: string; model_name?: string; display_name?: string; media_type?: string; max_reference_images?: number; max_reference_videos?: number; max_reference_audios?: number; supported_seconds?: number[]; supported_resolutions?: string[]; supports_face?: boolean; charge_mode?: "cnt" | "second"; timeout_seconds?: number };
 type UploadResponse = { upload_token?: string; token?: string; id?: string | number };
 type MediaVideoTask = {
     task_id?: string;
@@ -35,6 +37,8 @@ type MediaVideoTask = {
     model_config_id: number;
     model: string;
     poll_after_ms?: number;
+    timeout_seconds?: number;
+    created_at?: string;
     error_message?: string;
     result?: { url?: string; mime_type?: string } | null;
 };
@@ -55,14 +59,15 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
         throw new Error(state.status === "failed" ? state.error : "插件视频尚未完成");
     }
     await options?.onTask?.(task);
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    let deadline = videoTaskDeadline(task);
+    for (let attempt = 0; Date.now() < deadline; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("本地轮询已停止", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
         task = state.task;
+        deadline = Math.min(deadline, videoTaskDeadline(task));
         await options?.onTask?.(task);
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw new Error(state.error);
-        if (attempt === 119) throw new Error("视频生成超时，请稍后重试");
         await delay(state.task.pollAfterMs || 5000, options?.signal);
     }
     throw new Error("视频生成超时，请稍后重试");
@@ -70,9 +75,11 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 
 export async function resumeVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
     let current = task;
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    let deadline = videoTaskDeadline(current);
+    for (let attempt = 0; Date.now() < deadline; attempt += 1) {
         const state = await pollVideoGenerationTask(config, current, options);
         current = state.task;
+        deadline = Math.min(deadline, videoTaskDeadline(current));
         await options?.onTask?.(current);
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw new Error(state.error);
@@ -126,7 +133,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
             },
             { headers: sameOriginHeaders(requestConfig.apiKey), signal: options?.signal, withCredentials: true },
         );
-        return normalizeTask(response.data);
+        return { ...normalizeTask(response.data), timeoutSeconds: modelConfig.timeout_seconds };
     } catch (error) {
         throw new Error(readAxiosError(error, "视频任务创建失败"));
     }
@@ -284,7 +291,25 @@ async function storedMediaFile(reference: ReferenceVideo | ReferenceAudio, kind:
 function normalizeTask(payload: MediaVideoTask): VideoGenerationTask {
     const id = payload.task_id || payload.id;
     if (!id) throw new Error("视频接口没有返回任务 ID");
-    return { id, modelConfigId: payload.model_config_id, model: payload.model, status: payload.status, pollAfterMs: payload.poll_after_ms };
+    const task: VideoGenerationTask = { id, modelConfigId: payload.model_config_id, model: payload.model, status: payload.status, pollAfterMs: payload.poll_after_ms };
+    const timeoutSeconds = positiveSeconds(payload.timeout_seconds);
+    if (timeoutSeconds) task.timeoutSeconds = timeoutSeconds;
+    if (payload.created_at) task.createdAt = payload.created_at;
+    return task;
+}
+
+const DEFAULT_VIDEO_TIMEOUT_SECONDS = 1200;
+
+function videoTaskDeadline(task: VideoGenerationTask) {
+    const timeoutSeconds = positiveSeconds(task.timeoutSeconds) || DEFAULT_VIDEO_TIMEOUT_SECONDS;
+    const createdAt = task.createdAt ? Date.parse(task.createdAt) : Number.NaN;
+    const startedAt = Number.isFinite(createdAt) ? createdAt : Date.now();
+    return startedAt + timeoutSeconds * 1000;
+}
+
+function positiveSeconds(value: unknown) {
+    const seconds = Number(value);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
 }
 
 function terminalStatusMessage(status: VideoTaskStatus) {

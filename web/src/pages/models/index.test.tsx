@@ -38,7 +38,7 @@ vi.mock("lucide-react", () => ({
     Search: () => createElement("span"),
 }));
 
-import ModelsPage from "@/pages/models";
+import ModelsPage, { expandMarketplaceModels } from "@/pages/models";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -100,6 +100,17 @@ afterEach(() => {
 });
 
 describe("ModelsPage", () => {
+    it("splits video models that support both billing modes and annotates examples", () => {
+        const [count, second] = expandMarketplaceModels({
+            media_type: "video", name: "dual-video", charge_modes: ["cnt", "second"],
+            calls: [{ label: "生成", method: "POST", path: "/v1/videos", auth: "Bearer", example: '{"model":"dual-video"}' }],
+        });
+        expect(count.charge_mode).toBe("cnt");
+        expect(second.charge_mode).toBe("second");
+        expect(count.calls[0].example).toContain('"charge_mode": "cnt"');
+        expect(second.calls[0].example).toContain('"charge_mode": "second"');
+    });
+
     it("shows the complete public model note and preserves the existing card interaction", () => {
         const note = Array.from(container.querySelectorAll("p")).find((item) => item.textContent?.includes("公开模型备注"));
 
