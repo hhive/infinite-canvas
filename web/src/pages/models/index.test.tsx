@@ -64,6 +64,12 @@ beforeEach(async () => {
                         model_name: "image-public",
                         display_name: "完整显示名称",
                         provider: "OpenAI",
+                        sizes: ["1k", "2k"],
+                        qualities: ["low", "high"],
+                        price_1k: 1,
+                        price_2k: 2,
+                        price_low: 0.5,
+                        price_high: 3,
                         note: "这是需要完整换行展示的公开模型备注，不应该被截断。",
                         calls: [{ label: "同步生成", method: "POST", path: "/v1/images/generations", example: longCallExample, auth: "Bearer" }],
                     },
@@ -108,6 +114,15 @@ describe("ModelsPage", () => {
         expect(imageGroup?.textContent).toContain("完整显示名称");
         expect(creativeGroup?.textContent).toContain("创意模型");
         expect(creativeGroup?.textContent).toContain("Flux 绘图");
+    });
+
+    it("shows the same image model details as the media admin marketplace", () => {
+        const imageGroup = container.querySelector('[data-testid="marketplace-group-1"]');
+        expect(imageGroup?.textContent).toContain("尺寸：1k / 2k");
+        expect(imageGroup?.textContent).toContain("质量：low / high");
+        expect(imageGroup?.textContent).toContain("分辨率价格：1K 1 · 2K 2");
+        expect(imageGroup?.textContent).toContain("质量价格：低 0.5 · 高 3");
+        expect(imageGroup?.textContent).toContain("分辨率和质量同时传入时，按两者中较高价格计费。");
     });
 
     it("splits video models that support both billing modes and annotates examples", () => {
