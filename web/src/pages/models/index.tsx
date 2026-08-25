@@ -40,7 +40,13 @@ function modelName(model: MarketplaceModel) {
 export function expandMarketplaceModels(model: MarketplaceModel): MarketplaceModel[] {
     if (model.media_type !== "video" || !model.charge_modes?.length) return [model];
     const modes = [...new Set(model.charge_modes)].filter((mode) => mode === "cnt" || mode === "second");
-    return modes.length > 1 ? modes.map((charge_mode) => ({ ...model, charge_mode, calls: model.calls.map((call) => ({ ...call, example: addChargeMode(call.example, charge_mode) })) })) : [model];
+    return modes.length > 1 ? modes.map((charge_mode) => ({
+        ...model,
+        charge_mode,
+        resolution_prices: model.charge_mode_prices?.[charge_mode] ?? model.resolution_prices,
+        face_price: model.charge_mode_face_prices?.[charge_mode] ?? model.face_price,
+        calls: model.calls.map((call) => ({ ...call, example: addChargeMode(call.example, charge_mode) })),
+    })) : [model];
 }
 
 function addChargeMode(example: string, mode: "cnt" | "second") {

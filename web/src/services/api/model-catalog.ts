@@ -28,6 +28,8 @@ export type MarketplaceModel = {
     supports_face?: boolean;
     charge_mode?: "cnt" | "second";
     charge_modes?: Array<"cnt" | "second">;
+    charge_mode_prices?: Partial<Record<"cnt" | "second", Record<string, number>>>;
+    charge_mode_face_prices?: Partial<Record<"cnt" | "second", number>>;
     calls: MarketplaceCall[];
 };
 export type MarketplaceGroup = { id: number; name: string; models: MarketplaceModel[] };

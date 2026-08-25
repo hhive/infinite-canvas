@@ -103,10 +103,17 @@ describe("ModelsPage", () => {
     it("splits video models that support both billing modes and annotates examples", () => {
         const [count, second] = expandMarketplaceModels({
             media_type: "video", name: "dual-video", charge_modes: ["cnt", "second"],
+            resolution_prices: { "720p": 9 },
+            charge_mode_prices: { cnt: { "720p": 3.6 }, second: { "720p": 0.28 } },
+            charge_mode_face_prices: { cnt: 0.5, second: 0.05 },
             calls: [{ label: "生成", method: "POST", path: "/v1/videos", auth: "Bearer", example: '{"model":"dual-video"}' }],
         });
         expect(count.charge_mode).toBe("cnt");
         expect(second.charge_mode).toBe("second");
+        expect(count.resolution_prices).toEqual({ "720p": 3.6 });
+        expect(second.resolution_prices).toEqual({ "720p": 0.28 });
+        expect(count.face_price).toBe(0.5);
+        expect(second.face_price).toBe(0.05);
         expect(count.calls[0].example).toContain('"charge_mode": "cnt"');
         expect(second.calls[0].example).toContain('"charge_mode": "second"');
     });
