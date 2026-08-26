@@ -52,32 +52,33 @@ function sameOriginHeaders(apiKey: string) {
 }
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
-    let task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
+    const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
     if (task.provider === "plugin") {
         const state = await pollVideoGenerationTask(config, task, options);
         if (state.status === "completed") return state.result;
         throw new Error(state.status === "failed" ? state.error : "插件视频尚未完成");
     }
     await options?.onTask?.(task);
-    let deadline = videoTaskDeadline(task);
-    for (let attempt = 0; Date.now() < deadline; attempt += 1) {
-        if (options?.signal?.aborted) throw new DOMException("本地轮询已停止", "AbortError");
-        const state = await pollVideoGenerationTask(config, task, options);
-        task = state.task;
-        deadline = Math.min(deadline, videoTaskDeadline(task));
-        await options?.onTask?.(task);
-        if (state.status === "completed") return state.result;
-        if (state.status === "failed") throw new Error(state.error);
-        await delay(state.task.pollAfterMs || 5000, options?.signal);
-    }
-    throw new Error("视频生成超时，请稍后重试");
+    return pollVideoUntilComplete(config, task, options);
 }
 
 export async function resumeVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
+    return pollVideoUntilComplete(config, task, options);
+}
+
+async function pollVideoUntilComplete(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
     let current = task;
     let deadline = videoTaskDeadline(current);
-    for (let attempt = 0; Date.now() < deadline; attempt += 1) {
-        const state = await pollVideoGenerationTask(config, current, options);
+    while (Date.now() < deadline) {
+        if (options?.signal?.aborted) throw new DOMException("本地轮询已停止", "AbortError");
+        let state: VideoGenerationTaskState;
+        try {
+            state = await pollVideoGenerationTask(config, current, options);
+        } catch (error) {
+            if (!(error instanceof RetryableVideoPollError)) throw error;
+            await delay(Math.min(current.pollAfterMs || 5000, Math.max(0, deadline - Date.now())), options?.signal);
+            continue;
+        }
         current = state.task;
         deadline = Math.min(deadline, videoTaskDeadline(current));
         await options?.onTask?.(current);
@@ -156,6 +157,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
         if (result?.url) return { status: "completed", task: current, result: { url: result.url, mimeType: result.mime_type || "video/mp4" } };
         throw new Error("视频任务已完成但没有返回可播放地址");
     } catch (error) {
+        if (isTransientVideoPollError(error)) throw new RetryableVideoPollError(readAxiosError(error, "视频任务查询失败"));
         throw new Error(readAxiosError(error, "视频任务查询失败"));
     }
 }
@@ -315,6 +317,12 @@ function positiveSeconds(value: unknown) {
 function terminalStatusMessage(status: VideoTaskStatus) {
     if (status === "expired") return "视频任务已过期";
     return "视频生成失败";
+}
+
+class RetryableVideoPollError extends Error {}
+
+function isTransientVideoPollError(error: unknown) {
+    return !axios.isCancel(error) && axios.isAxiosError(error) && !error.response;
 }
 
 function readAxiosError(error: unknown, fallback: string) {
