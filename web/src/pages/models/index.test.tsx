@@ -175,6 +175,18 @@ describe("ModelsPage", () => {
         expect(container.textContent).not.toContain("预扣价格：");
     });
 
+    it("replaces the video standalone price row with a bold resolution quota row and keeps the face row style", () => {
+        const videoArticle = Array.from(container.querySelectorAll("article")).find((item) => item.textContent?.includes("视频模型"));
+        const hasBarePriceRow = Array.from(videoArticle?.querySelectorAll("div") ?? []).some((div) => div.className === "text-sm font-medium");
+        expect(hasBarePriceRow).toBe(false);
+
+        const resolutionRow = Array.from(videoArticle?.querySelectorAll("div") ?? []).find((div) => div.textContent?.includes("分辨率预扣额度："));
+        expect(resolutionRow?.className).toContain("font-semibold");
+
+        const faceRow = Array.from(videoArticle?.querySelectorAll("div") ?? []).find((div) => div.textContent?.includes("卡脸附加预扣额度："));
+        expect(faceRow?.className).toContain("font-normal");
+    });
+
     it("filters by trimmed case-insensitive keyword, media type and provider while hiding empty groups", () => {
         const search = container.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]');
         expect(search).toBeTruthy();
