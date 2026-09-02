@@ -243,8 +243,13 @@ async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<
 }
 
 async function resolveVideoModelConfig(model: string, apiKey: string, signal?: AbortSignal) {
-    const response = await axios.get<VideoModel[]>("/v1/models", { headers: sameOriginHeaders(apiKey), params: { media_type: "video" }, signal, withCredentials: true });
-    const config = response.data.find((item) => (!item.media_type || item.media_type === "video") && publicVideoModelName(item) === model);
+    const response = await axios.get<unknown>("/v1/models", { headers: sameOriginHeaders(apiKey), params: { media_type: "video" }, signal, withCredentials: true });
+    const payload = response.data;
+    const records = payload && typeof payload === "object" && !Array.isArray(payload) && (payload as { object?: unknown }).object === "list"
+        ? (payload as { data?: unknown }).data
+        : payload;
+    if (!Array.isArray(records)) throw new Error("视频模型接口返回格式无效");
+    const config = records.find((item): item is VideoModel => Boolean(item && typeof item === "object") && (!((item as VideoModel).media_type) || (item as VideoModel).media_type === "video") && publicVideoModelName(item as VideoModel) === model);
     if (!config) throw new Error(`当前模型 ${model} 没有可用的媒体站视频配置`);
     return config;
 }

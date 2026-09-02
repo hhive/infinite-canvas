@@ -134,6 +134,13 @@ describe("media video task API", () => {
         expect(vi.mocked(axios.post).mock.calls[0]?.[1]).not.toHaveProperty("model_config_id");
     });
 
+    it("resolves video models from the standard list envelope", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: { object: "list", data: [{ id: 7, model: "upstream-video", model_name: "media-video-create", media_type: "video" }] } });
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: { task_id: "video-envelope", status: "queued", model_config_id: 7, model: "media-video-create", poll_after_ms: 1500 } });
+
+        await expect(createVideoGenerationTask(config("media-video-create", "secret-key"), "ocean at dusk")).resolves.toMatchObject({ id: "video-envelope", modelConfigId: 7 });
+    });
+
     it("uploads reference media without binding the upload to a model config", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "upstream-video", model_name: "media-video-create", media_type: "video", max_reference_images: 1 }] });
         vi.mocked(axios.post)
