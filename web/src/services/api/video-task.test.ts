@@ -6,7 +6,7 @@ const { runModelPlugin, uploadMediaFile } = vi.hoisted(() => ({ runModelPlugin: 
 vi.mock("@/services/api/model-plugin", () => ({ runModelPlugin }));
 vi.mock("@/services/file-storage", () => ({ getMediaBlob: vi.fn(), uploadMediaFile }));
 
-import { GENERATED_VIDEO_LOCAL_STORE_TIMEOUT_MS, createVideoGenerationTask, pollVideoGenerationTask, requestVideoGeneration, storeGeneratedVideo, validateVideoReferenceCounts, type VideoGenerationTask } from "@/services/api/video";
+import { GENERATED_VIDEO_LOCAL_STORE_TIMEOUT_MS, createVideoGenerationTask, pollVideoGenerationTask, previewGeneratedVideo, requestVideoGeneration, resumeVideoGenerationTask, storeGeneratedVideo, validateVideoReferenceCounts, type VideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
 
 vi.mock("axios", () => ({
@@ -32,11 +32,42 @@ function config(model: string, apiKey = ""): AiConfig {
 const task: VideoGenerationTask = { id: "video-1", modelConfigId: 7, model: "media-video-test", status: "running", pollAfterMs: 1200 };
 
 afterEach(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
     vi.useRealTimers();
     vi.clearAllMocks();
 });
 
 describe("media video task API", () => {
+    it("creates an immediate playable preview without local persistence", () => {
+        expect(previewGeneratedVideo({ url: "https://media.example.test/result.mp4", mimeType: "video/mp4" })).toEqual({
+            url: "https://media.example.test/result.mp4",
+            storageKey: "",
+            bytes: 0,
+            mimeType: "video/mp4",
+        });
+        expect(uploadMediaFile).not.toHaveBeenCalled();
+    });
+
+    it("polls immediately when a background video page becomes visible", async () => {
+        vi.useFakeTimers();
+        Object.defineProperty(document, "hidden", { configurable: true, value: true });
+        vi.mocked(axios.get)
+            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "running", model_config_id: 7, model: task.model, poll_after_ms: 10_000 } })
+            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "completed", model_config_id: 7, model: task.model, result: { url: "https://media.example.test/result.mp4" } } });
+
+        const pending = resumeVideoGenerationTask(config(task.model), task);
+        const addEventListener = vi.spyOn(document, "addEventListener");
+        for (let index = 0; index < 10 && !addEventListener.mock.calls.some(([type]) => type === "visibilitychange"); index += 1) await Promise.resolve();
+        expect(axios.get).toHaveBeenCalledOnce();
+        expect(addEventListener).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+
+        Object.defineProperty(document, "hidden", { configurable: true, value: false });
+        document.dispatchEvent(new Event("visibilitychange"));
+        await vi.advanceTimersByTimeAsync(0);
+        await expect(pending).resolves.toEqual({ url: "https://media.example.test/result.mp4", mimeType: "video/mp4" });
+        expect(axios.get).toHaveBeenCalledTimes(2);
+    });
+
     it("runs a scripted video model without creating or persisting a Media task", async () => {
         runModelPlugin.mockResolvedValueOnce({ video_url: "https://plugin.example.test/result.mp4" });
         const scripted = config("scripted-video", "plugin-key");

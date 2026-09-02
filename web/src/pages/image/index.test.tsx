@@ -2,13 +2,14 @@ import { act, createElement, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { imageToDataUrl, message, prepareImageEditReferences, requestEdit, requestGeneration, storedLogs, uploadImage } = vi.hoisted(() => ({
+const { imageToDataUrl, message, prepareImageEditReferences, requestEdit, requestGeneration, storedLogs, uploadGeneratedImage, uploadImage } = vi.hoisted(() => ({
     imageToDataUrl: vi.fn(),
     message: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
     prepareImageEditReferences: vi.fn(),
     requestEdit: vi.fn(),
     requestGeneration: vi.fn(),
     storedLogs: new Map<string, unknown>(),
+    uploadGeneratedImage: vi.fn(),
     uploadImage: vi.fn(),
 }));
 
@@ -40,6 +41,7 @@ vi.mock("localforage", () => ({
 vi.mock("@/services/image-storage", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/services/image-storage")>()),
     imageToDataUrl,
+    uploadGeneratedImage,
     uploadImage,
 }));
 
@@ -168,6 +170,8 @@ beforeEach(async () => {
         const name = input instanceof File ? input.name : "clipboard";
         return { url: `blob:${name}`, storageKey: `image:${name}`, width: 1, height: 1, bytes: input.size, mimeType };
     });
+    uploadGeneratedImage.mockReset();
+    uploadGeneratedImage.mockResolvedValue({ url: "blob:generated", storageKey: "image:generated", width: 1280, height: 720, bytes: PNG_BYTES.byteLength, mimeType: "image/png" });
     requestEdit.mockResolvedValue([{ id: "generated", dataUrl: `data:image/png;base64,${Buffer.from(PNG_BYTES).toString("base64")}` }]);
     requestGeneration.mockResolvedValue([{ id: "generated", dataUrl: `data:image/png;base64,${Buffer.from(PNG_BYTES).toString("base64")}` }]);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { read: vi.fn(async () => []) } });
@@ -185,6 +189,62 @@ afterEach(() => {
 });
 
 describe("ImagePage reference uploads", () => {
+    it("persists a generated result once and reuses the stored image metadata", async () => {
+        const textarea = container.querySelector<HTMLTextAreaElement>("textarea");
+        const generateButton = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.includes("开始生成"));
+        expect(textarea).toBeTruthy();
+        expect(generateButton).toBeTruthy();
+
+        await act(async () => {
+            textarea?.focus();
+            if (textarea) {
+                Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, "生成一张测试图片");
+                textarea.dispatchEvent(new Event("input", { bubbles: true }));
+                textarea.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+        });
+        await act(async () => {
+            generateButton?.click();
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(uploadGeneratedImage).toHaveBeenCalledOnce();
+        expect(uploadGeneratedImage).toHaveBeenCalledWith(expect.stringMatching(/^data:image\/png;base64,/));
+        expect(container.querySelector('img[src="blob:generated"]')).toBeTruthy();
+        expect(container.textContent).toContain("1280x720");
+    });
+
+    it("shows the completed server result before local persistence finishes", async () => {
+        let finishPersistence!: (value: { url: string; storageKey: string; width: number; height: number; bytes: number; mimeType: string }) => void;
+        uploadGeneratedImage.mockReturnValueOnce(new Promise((resolve) => {
+            finishPersistence = resolve;
+        }));
+        const textarea = container.querySelector<HTMLTextAreaElement>("textarea");
+        const generateButton = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.includes("开始生成"));
+
+        await act(async () => {
+            if (textarea) {
+                Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, "立即展示结果");
+                textarea.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+        });
+        await act(async () => {
+            generateButton?.click();
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        expect(container.querySelector('img[src^="data:image/png;base64,"]')).toBeTruthy();
+        expect(container.textContent).not.toContain("生成中");
+
+        await act(async () => {
+            finishPersistence({ url: "blob:persisted", storageKey: "image:persisted", width: 1280, height: 720, bytes: PNG_BYTES.byteLength, mimeType: "image/png" });
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+    });
+
     it("uses the exact extension accept list on the real file input", () => {
         const input = container.querySelector<HTMLInputElement>('input[type="file"]');
         expect(input).toBeTruthy();
