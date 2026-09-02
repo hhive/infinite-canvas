@@ -31,7 +31,7 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
         withCredentials: true,
     });
     const imageEnvelope = response.data && typeof response.data === "object" && !Array.isArray(response.data) ? (response.data as Record<string, unknown>) : null;
-    const records = capability === "image" ? (imageEnvelope?.object === "list" ? imageEnvelope.data : undefined) : response.data;
+	const records = imageEnvelope?.object === "list" ? imageEnvelope.data : response.data;
     if (!Array.isArray(records)) throw new Error(`${capability === "image" ? "图片" : "视频"}模型接口返回格式无效`);
     const seenIds = new Set<number>();
     const seenSelectionModels = new Set<string>();
