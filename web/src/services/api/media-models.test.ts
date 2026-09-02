@@ -27,6 +27,7 @@ describe("fetchMediaModels", () => {
         ]);
         expect(axios.get).toHaveBeenCalledWith("/v1/models", {
             headers: { Authorization: "Bearer sk-test" },
+            params: { media_type: "image" },
             signal: undefined,
             withCredentials: true,
         });

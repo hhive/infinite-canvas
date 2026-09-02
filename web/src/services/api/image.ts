@@ -913,7 +913,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 
 export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
     try {
-        const response = await axios.get<unknown>("/v1/models", { headers: sameOriginHeaders(config.apiKey), withCredentials: true });
+    const response = await axios.get<unknown>("/v1/models", { headers: sameOriginHeaders(config.apiKey), params: { media_type: "image" }, withCredentials: true });
         if (!isRecord(response.data) || response.data.object !== "list" || !Array.isArray(response.data.data)) throw new Error("模型接口返回格式无效");
         imageModelAvailability.clear();
         for (const raw of response.data.data) {

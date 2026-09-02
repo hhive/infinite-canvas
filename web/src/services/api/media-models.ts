@@ -26,7 +26,7 @@ function authHeaders(apiKey: string) {
 export async function fetchMediaModels(capability: MediaCapability, apiKey = "", signal?: AbortSignal): Promise<MediaModel[]> {
     const response = await axios.get<unknown>("/v1/models", {
         headers: authHeaders(apiKey),
-        ...(capability === "video" ? { params: { media_type: "video" } } : {}),
+        params: { media_type: capability },
         signal,
         withCredentials: true,
     });
