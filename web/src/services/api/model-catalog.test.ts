@@ -14,7 +14,7 @@ describe("fetchModelCatalog", () => {
         expect(catalog.groups[0].models[0].calls).toHaveLength(2);
         expect(catalog.groups[0].models[0].calls[1].path).toBe("/v1/images/tasks/{task_id}");
         expect(catalog.groups[0].models[0]).toMatchObject({ display_name: "完整显示名称", model_name: "image-public", note: "公开模型备注" });
-        expect(axios.get).toHaveBeenCalledWith("/api/models/catalog", { signal: undefined });
+        expect(axios.get).toHaveBeenCalledWith("/api/pricing", { signal: undefined });
     });
 });
 

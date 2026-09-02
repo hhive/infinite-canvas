@@ -5,7 +5,7 @@ import { defaultConfig, selectableModelsByCapability } from "@/stores/use-config
 
 describe("shouldInitializeClientRoot", () => {
     it("does not initialize API key prompts on the public model marketplace", () => {
-        expect(shouldInitializeClientRoot("/models")).toBe(false);
+        expect(shouldInitializeClientRoot("/pricing")).toBe(false);
         expect(shouldInitializeClientRoot("/")).toBe(true);
         expect(shouldInitializeClientRoot("/image")).toBe(true);
     });

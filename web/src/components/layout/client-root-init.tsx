@@ -89,7 +89,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 }
 
 export function shouldInitializeClientRoot(pathname: string): boolean {
-    return pathname !== "/models";
+    return pathname !== "/pricing";
 }
 
 export function cookieSessionReadiness(probeSucceeded: boolean, authenticationKey: string) {

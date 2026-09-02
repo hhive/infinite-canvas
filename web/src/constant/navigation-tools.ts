@@ -18,7 +18,7 @@ export const navigationTools = [
         icon: FileText,
     },
     {
-        slug: "models",
+        slug: "pricing",
         icon: Boxes,
     },
     {

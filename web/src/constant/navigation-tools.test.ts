@@ -10,7 +10,7 @@ describe("navigation tools translations", () => {
             expect(zhCN.navigation[tool.slug]).toBeTruthy();
             expect(enUS.navigation[tool.slug]).toBeTruthy();
         }
-        expect(zhCN.navigation.models).toBe("模型广场");
-        expect(enUS.navigation.models).toBe("Model Marketplace");
+        expect(zhCN.navigation.pricing).toBe("模型广场");
+        expect(enUS.navigation.pricing).toBe("Model Marketplace");
     });
 });

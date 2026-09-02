@@ -314,6 +314,7 @@ export default {
         video: "Video Studio",
         prompts: "Prompt Library",
         models: "Model Marketplace",
+        pricing: "Model Marketplace",
         assets: "My Assets",
         config: "Settings",
     },

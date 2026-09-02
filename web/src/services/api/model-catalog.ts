@@ -49,6 +49,6 @@ export function imagePricingRows(model: MarketplaceModel) {
 }
 
 export async function fetchModelCatalog(signal?: AbortSignal) {
-    const response = await axios.get<MarketplaceResponse>("/api/models/catalog", { signal });
+    const response = await axios.get<MarketplaceResponse>("/api/pricing", { signal });
     return response.data;
 }
