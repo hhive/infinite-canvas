@@ -115,6 +115,14 @@ describe("ModelsPage", () => {
         expect(tableToggle).toBeTruthy();
         act(() => tableToggle?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
         expect(container.querySelector("table")).toBeTruthy();
+        expect(container.querySelectorAll('input[aria-label="搜索模型"]').length).toBe(1);
+        expect(container.querySelector('[data-testid="pricing-price-mode"]')).toBeTruthy();
+    });
+    it("exposes pricing filters and explicit detail/copy actions", () => {
+        expect(container.querySelector('[data-testid="pricing-group-filter"]')).toBeTruthy();
+        expect(container.querySelector('[data-testid="pricing-billing-filter"]')).toBeTruthy();
+        expect(container.querySelector('[aria-label="查看模型详情"]')?.getAttribute("href")).toBe("/pricing/image-public");
+        expect(container.querySelector('[aria-label="复制模型名称"]')).toBeTruthy();
     });
     it("renders marketplace cards under their Sub2API group headings", () => {
         const imageGroup = container.querySelector('[data-testid="marketplace-group-1"]');
@@ -153,7 +161,7 @@ describe("ModelsPage", () => {
         expect(second.calls[0].example).toContain('"charge_mode": "second"');
     });
 
-    it("shows the complete public model note and preserves the existing card interaction", () => {
+    it("shows the complete public model note and exposes the detail route", () => {
         const note = Array.from(container.querySelectorAll("p")).find((item) => item.textContent?.includes("公开模型备注"));
 
         expect(note).toBeTruthy();
@@ -162,15 +170,7 @@ describe("ModelsPage", () => {
         expect(note?.classList.contains("truncate")).toBe(false);
         expect(note?.className).not.toMatch(/line-clamp/);
 
-        act(() => note?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-
-        expect(container.querySelector('[data-testid="model-modal"]')).toBeTruthy();
-        const example = container.querySelector("pre");
-        expect(example?.textContent).toBe(longCallExample);
-        expect(example?.classList.contains("whitespace-pre-wrap")).toBe(true);
-        expect(example?.classList.contains("break-words")).toBe(true);
-        expect(example?.className).toContain("[overflow-wrap:anywhere]");
-        expect(example?.classList.contains("overflow-x-auto")).toBe(false);
+        expect(container.querySelector('[aria-label="查看模型详情"]')).toBeTruthy();
     });
 
     it("shows the complete video capability contract and billing unit", () => {
@@ -204,7 +204,7 @@ describe("ModelsPage", () => {
         act(() => changeValue(search!, "  VIDEO-PUBLIC  "));
         expect(container.textContent).toContain("视频模型");
         expect(container.textContent).not.toContain("完整显示名称");
-        expect(container.textContent).not.toContain("创意模型");
+        expect(container.querySelector('[data-testid="marketplace-group-2"]')).toBeNull();
         expect(container.textContent).toContain("当前命中 1 / 共 3 个模型");
 
         act(() => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "图片")?.click());
@@ -214,7 +214,7 @@ describe("ModelsPage", () => {
         const provider = container.querySelector<HTMLSelectElement>('select[aria-label="供应商筛选"]');
         act(() => changeValue(provider!, "Black Forest Labs"));
         expect(container.textContent).toContain("Flux 绘图");
-        expect(container.textContent).not.toContain("图片模型");
+        expect(container.querySelector('[data-testid="marketplace-group-1"]')).toBeNull();
         expect(container.textContent).toContain("当前命中 1 / 共 3 个模型");
     });
 
