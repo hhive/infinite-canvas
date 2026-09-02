@@ -32,6 +32,7 @@ vi.mock("antd", () => ({
 }));
 
 vi.mock("lucide-react", () => ({
+    ArrowLeft: () => createElement("span"),
     Copy: () => createElement("span"),
     ExternalLink: () => createElement("span"),
     RotateCcw: () => createElement("span"),
@@ -50,6 +51,7 @@ function changeValue(element: HTMLInputElement | HTMLSelectElement, value: strin
 }
 
 beforeEach(async () => {
+    window.history.pushState({}, "", "/pricing");
     fetchModelCatalog.mockResolvedValue({
         enabled: true,
         fields: ["provider", "sizes", "qualities", "prices", "video_capabilities"],
@@ -183,6 +185,23 @@ describe("ModelsPage", () => {
         expect(container.textContent).toContain("分辨率预扣额度：720p 1.25 / 秒 · 1k 1.75 / 秒");
         expect(container.textContent).toContain("卡脸附加预扣额度：0.5 / 秒");
         expect(container.textContent).not.toContain("预扣价格：");
+    });
+
+    it("renders a New API-style detail view for a pricing deep link", async () => {
+        act(() => root.unmount());
+        window.history.pushState({}, "", "/pricing/image-public");
+        root = createRoot(container);
+        await act(async () => root.render(createElement(ModelsPage)));
+
+        expect(container.querySelector('[data-testid="pricing-detail"]')).toBeTruthy();
+        expect(container.querySelector('[data-testid="pricing-detail-title"]')?.textContent).toBe("完整显示名称");
+        expect(container.querySelector('[data-testid="pricing-detail-price"]')).toBeTruthy();
+        expect(container.textContent).toContain("Pricing · Model details");
+        expect(container.textContent).toContain("能力与价格");
+        expect(container.textContent).toContain("模型说明");
+        expect(container.textContent).toContain("调用示例");
+        expect(container.querySelector('a[href="/pricing"]')).toBeTruthy();
+        window.history.pushState({}, "", "/pricing");
     });
 
     it("replaces the video standalone price row with a bold resolution quota row and keeps the face row style", () => {
