@@ -108,6 +108,8 @@ afterEach(() => {
 describe("ModelsPage", () => {
     it("uses the new Pricing page visual structure and view toggle", () => {
         expect(container.querySelector('[data-testid="pricing-page"]')).toBeTruthy();
+        expect(container.textContent).toContain("Pricing · 3 models");
+        expect(container.textContent).toContain("排序：");
         expect(container.querySelector("aside")).toBeTruthy();
         const tableToggle = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("表格"));
         expect(tableToggle).toBeTruthy();

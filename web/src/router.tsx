@@ -28,6 +28,7 @@ export const router = createBrowserRouter([
             { path: "/assets", element: <AssetsPage /> },
             { path: "/prompts", element: <PromptsPage /> },
             { path: "/pricing", element: <ModelsPage /> },
+            { path: "/pricing/:modelId", element: <ModelsPage /> },
             { path: "/canvas", element: <CanvasPage /> },
             { path: "/canvas/:id", element: <CanvasProjectPage /> },
             { path: "/config", element: <ConfigPage /> },
