@@ -35,6 +35,11 @@ afterEach(() => {
     Object.defineProperty(document, "hidden", { configurable: true, value: false });
     vi.useRealTimers();
     vi.clearAllMocks();
+    vi.mocked(axios.get).mockReset();
+    vi.mocked(axios.post).mockReset();
+    vi.mocked(axios.delete).mockReset();
+    vi.mocked(axios.isAxiosError).mockReset().mockImplementation(() => false);
+    vi.mocked(axios.isCancel).mockReset().mockImplementation(() => false);
 });
 
 describe("media video task API", () => {
@@ -179,6 +184,65 @@ describe("media video task API", () => {
 
         await expect(pollVideoGenerationTask(config(task.model), task)).resolves.toEqual({ status: "pending", task: { ...task, pollAfterMs: 2000 } });
         await expect(pollVideoGenerationTask(config(task.model), task)).resolves.toEqual({ status: "failed", task: { ...task, status: "failed", pollAfterMs: undefined }, error: "upstream rejected" });
+    });
+
+    it("uses the backend timeout instead of a fixed polling attempt limit", async () => {
+        vi.useFakeTimers();
+        const createdAt = new Date(Date.now() - 1000).toISOString();
+        vi.mocked(axios.get)
+            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "running", model_config_id: 7, model: task.model, poll_after_ms: 500, timeout_seconds: 3, created_at: createdAt } })
+            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "completed", model_config_id: 7, model: task.model, result: { url: "https://media.example.test/result.mp4" }, timeout_seconds: 3, created_at: createdAt } });
+        const pending = resumeVideoGenerationTask(config(task.model), task);
+        await vi.advanceTimersByTimeAsync(500);
+        await expect(pending).resolves.toEqual({ url: "https://media.example.test/result.mp4", mimeType: "video/mp4" });
+        expect(axios.get).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps polling after a transient network error", async () => {
+        vi.useFakeTimers();
+        const networkError = Object.assign(new Error("Network Error"), { request: {} });
+        vi.mocked(axios.isAxiosError).mockImplementation((error) => error === networkError);
+        vi.mocked(axios.get)
+            .mockRejectedValueOnce(networkError)
+            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "completed", model_config_id: 7, model: task.model, result: { url: "https://media.example.test/result.mp4" } } });
+
+        const completed = expect(resumeVideoGenerationTask(config(task.model), task)).resolves.toEqual({ url: "https://media.example.test/result.mp4", mimeType: "video/mp4" });
+        await vi.advanceTimersByTimeAsync(task.pollAfterMs!);
+
+        await completed;
+        expect(axios.get).toHaveBeenCalledTimes(2);
+    });
+
+    it("stops transient network retries at the backend deadline", async () => {
+        vi.useFakeTimers();
+        const networkError = Object.assign(new Error("Network Error"), { request: {} });
+        vi.mocked(axios.isAxiosError).mockImplementation((error) => error === networkError);
+        vi.mocked(axios.get).mockRejectedValue(networkError);
+        const expiringTask = { ...task, timeoutSeconds: 2, createdAt: new Date().toISOString() };
+
+        const expired = expect(resumeVideoGenerationTask(config(task.model), expiringTask)).rejects.toThrow("视频生成超时，请稍后重试");
+        await vi.advanceTimersByTimeAsync(2000);
+
+        await expired;
+        expect(axios.get).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not retry an HTTP polling error", async () => {
+        const httpError = Object.assign(new Error("Request failed with status code 503"), { response: { status: 503 } });
+        vi.mocked(axios.isAxiosError).mockImplementation((error) => error === httpError);
+        vi.mocked(axios.get).mockRejectedValueOnce(httpError);
+
+        await expect(resumeVideoGenerationTask(config(task.model), task)).rejects.toThrow("Request failed with status code 503");
+        expect(axios.get).toHaveBeenCalledOnce();
+    });
+
+    it("does not retry a canceled polling request", async () => {
+        const canceled = new Error("canceled");
+        vi.mocked(axios.isCancel).mockImplementation((error) => error === canceled);
+        vi.mocked(axios.get).mockRejectedValueOnce(canceled);
+
+        await expect(resumeVideoGenerationTask(config(task.model), task)).rejects.toThrow("请求已取消");
+        expect(axios.get).toHaveBeenCalledOnce();
     });
 
     it("does not call the removed content endpoint when a completed task has no result URL", async () => {

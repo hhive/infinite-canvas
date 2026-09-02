@@ -3,6 +3,7 @@ import axios from "axios";
 export type MarketplaceCall = { label: string; method: string; path: string; example: string; auth: string };
 export type MarketplaceModel = {
     media_type: "image" | "video";
+    sort_order?: number;
     name: string;
     model_name?: string;
     display_name?: string;
@@ -26,6 +27,9 @@ export type MarketplaceModel = {
     face_price?: number;
     supports_face?: boolean;
     charge_mode?: "cnt" | "second";
+    charge_modes?: Array<"cnt" | "second">;
+    charge_mode_prices?: Partial<Record<"cnt" | "second", Record<string, number>>>;
+    charge_mode_face_prices?: Partial<Record<"cnt" | "second", number>>;
     calls: MarketplaceCall[];
 };
 export type MarketplaceGroup = { id: number; name: string; models: MarketplaceModel[] };

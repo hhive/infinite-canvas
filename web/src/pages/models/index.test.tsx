@@ -38,7 +38,7 @@ vi.mock("lucide-react", () => ({
     Search: () => createElement("span"),
 }));
 
-import ModelsPage from "@/pages/models";
+import ModelsPage, { expandMarketplaceModels } from "@/pages/models";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -64,6 +64,12 @@ beforeEach(async () => {
                         model_name: "image-public",
                         display_name: "完整显示名称",
                         provider: "OpenAI",
+                        sizes: ["1k", "2k"],
+                        qualities: ["low", "high"],
+                        price_1k: 1,
+                        price_2k: 2,
+                        price_low: 0.5,
+                        price_high: 3,
                         note: "这是需要完整换行展示的公开模型备注，不应该被截断。",
                         calls: [{ label: "同步生成", method: "POST", path: "/v1/images/generations", example: longCallExample, auth: "Bearer" }],
                     },
@@ -100,6 +106,43 @@ afterEach(() => {
 });
 
 describe("ModelsPage", () => {
+    it("renders marketplace cards under their Sub2API group headings", () => {
+        const imageGroup = container.querySelector('[data-testid="marketplace-group-1"]');
+        const creativeGroup = container.querySelector('[data-testid="marketplace-group-2"]');
+        expect(imageGroup?.textContent).toContain("图片模型");
+        expect(imageGroup?.textContent).toContain("2 个模型");
+        expect(imageGroup?.textContent).toContain("完整显示名称");
+        expect(creativeGroup?.textContent).toContain("创意模型");
+        expect(creativeGroup?.textContent).toContain("Flux 绘图");
+    });
+
+    it("shows the same image model details as the media admin marketplace", () => {
+        const imageGroup = container.querySelector('[data-testid="marketplace-group-1"]');
+        expect(imageGroup?.textContent).toContain("尺寸：1k / 2k");
+        expect(imageGroup?.textContent).toContain("质量：low / high");
+        expect(imageGroup?.textContent).toContain("分辨率价格：1K 1 · 2K 2");
+        expect(imageGroup?.textContent).toContain("质量价格：低 0.5 · 高 3");
+        expect(imageGroup?.textContent).toContain("分辨率和质量同时传入时，按两者中较高价格计费。");
+    });
+
+    it("splits video models that support both billing modes and annotates examples", () => {
+        const [count, second] = expandMarketplaceModels({
+            media_type: "video", name: "dual-video", charge_modes: ["cnt", "second"],
+            resolution_prices: { "720p": 9 },
+            charge_mode_prices: { cnt: { "720p": 3.6 }, second: { "720p": 0.28 } },
+            charge_mode_face_prices: { cnt: 0.5, second: 0.05 },
+            calls: [{ label: "生成", method: "POST", path: "/v1/videos", auth: "Bearer", example: '{"model":"dual-video"}' }],
+        });
+        expect(count.charge_mode).toBe("cnt");
+        expect(second.charge_mode).toBe("second");
+        expect(count.resolution_prices).toEqual({ "720p": 3.6 });
+        expect(second.resolution_prices).toEqual({ "720p": 0.28 });
+        expect(count.face_price).toBe(0.5);
+        expect(second.face_price).toBe(0.05);
+        expect(count.calls[0].example).toContain('"charge_mode": "cnt"');
+        expect(second.calls[0].example).toContain('"charge_mode": "second"');
+    });
+
     it("shows the complete public model note and preserves the existing card interaction", () => {
         const note = Array.from(container.querySelectorAll("p")).find((item) => item.textContent?.includes("公开模型备注"));
 
@@ -130,6 +173,18 @@ describe("ModelsPage", () => {
         expect(container.textContent).toContain("分辨率预扣额度：720p 1.25 / 秒 · 1k 1.75 / 秒");
         expect(container.textContent).toContain("卡脸附加预扣额度：0.5 / 秒");
         expect(container.textContent).not.toContain("预扣价格：");
+    });
+
+    it("replaces the video standalone price row with a bold resolution quota row and keeps the face row style", () => {
+        const videoArticle = Array.from(container.querySelectorAll("article")).find((item) => item.textContent?.includes("视频模型"));
+        const hasBarePriceRow = Array.from(videoArticle?.querySelectorAll("div") ?? []).some((div) => div.className === "text-sm font-medium");
+        expect(hasBarePriceRow).toBe(false);
+
+        const resolutionRow = Array.from(videoArticle?.querySelectorAll("div") ?? []).find((div) => div.textContent?.includes("分辨率预扣额度："));
+        expect(resolutionRow?.className).toContain("font-semibold");
+
+        const faceRow = Array.from(videoArticle?.querySelectorAll("div") ?? []).find((div) => div.textContent?.includes("卡脸附加预扣额度："));
+        expect(faceRow?.className).toContain("font-normal");
     });
 
     it("filters by trimmed case-insensitive keyword, media type and provider while hiding empty groups", () => {
