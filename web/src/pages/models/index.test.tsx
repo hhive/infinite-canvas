@@ -24,7 +24,7 @@ vi.mock("antd", () => ({
     Card: ({ children, title, onClick }: { children?: ReactNode; title?: ReactNode; onClick?: () => void }) => createElement("article", { onClick }, title, children),
     Empty: ({ description }: { description?: ReactNode }) => createElement("div", null, description),
     Input: (props: ComponentProps<"input">) => createElement("input", props),
-    Modal: ({ children, open, title }: { children?: ReactNode; open?: boolean; title?: ReactNode }) => (open ? createElement("section", { "data-testid": "model-modal" }, title, children) : null),
+    Drawer: ({ children, open, title, onClose }: { children?: ReactNode; open?: boolean; title?: ReactNode; onClose?: () => void }) => (open ? createElement("section", { "data-testid": "pricing-detail-drawer" }, title, createElement("button", { type: "button", "aria-label": "Close", onClick: onClose }), children) : null),
     Segmented: ({ options, value, onChange, ...props }: { options: Array<{ label: string; value: string }>; value: string; onChange: (value: string) => void; [key: string]: unknown }) => createElement("div", props, options.map((option) => createElement("button", { key: option.value, type: "button", "aria-pressed": value === option.value, onClick: () => onChange(option.value) }, option.label))),
     Select: ({ options, value, onChange, ...props }: { options: Array<{ label: string; value: string }>; value: string; onChange: (value: string) => void; [key: string]: unknown }) => createElement("select", { ...props, value, onChange: (event: Event) => onChange((event.target as HTMLSelectElement).value) }, options.map((option) => createElement("option", { key: option.value, value: option.value }, option.label))),
     Spin: () => createElement("div", null, "loading"),
@@ -123,7 +123,12 @@ describe("ModelsPage", () => {
     it("exposes pricing filters and explicit detail/copy actions", () => {
         expect(container.querySelector('[data-testid="pricing-group-filter"]')).toBeTruthy();
         expect(container.querySelector('[data-testid="pricing-billing-filter"]')).toBeTruthy();
-        expect(container.querySelector('[aria-label="查看模型详情"]')?.getAttribute("href")).toBe("/pricing/image-public");
+        const detailButton = container.querySelector<HTMLButtonElement>('[aria-label="查看模型详情"]');
+        expect(detailButton?.tagName).toBe("BUTTON");
+        act(() => detailButton?.click());
+        expect(container.querySelector('[data-testid="pricing-detail-drawer"]')).toBeTruthy();
+        act(() => container.querySelector<HTMLButtonElement>('[aria-label="Close"]')?.click());
+        expect(container.querySelector('[data-testid="pricing-detail-drawer"]')).toBeNull();
         expect(container.querySelector('[aria-label="复制模型名称"]')).toBeTruthy();
     });
     it("renders marketplace cards under their Sub2API group headings", () => {
@@ -173,6 +178,7 @@ describe("ModelsPage", () => {
         expect(note?.className).not.toMatch(/line-clamp/);
 
         expect(container.querySelector('[aria-label="查看模型详情"]')).toBeTruthy();
+        expect(container.querySelector('a[href^="/pricing/"]')).toBeNull();
     });
 
     it("shows the complete video capability contract and billing unit", () => {
@@ -187,20 +193,14 @@ describe("ModelsPage", () => {
         expect(container.textContent).not.toContain("预扣价格：");
     });
 
-    it("renders a New API-style detail view for a pricing deep link", async () => {
+    it("does not expose a deep-link detail page", async () => {
         act(() => root.unmount());
         window.history.pushState({}, "", "/pricing/image-public");
         root = createRoot(container);
         await act(async () => root.render(createElement(ModelsPage)));
 
-        expect(container.querySelector('[data-testid="pricing-detail"]')).toBeTruthy();
-        expect(container.querySelector('[data-testid="pricing-detail-title"]')?.textContent).toBe("完整显示名称");
-        expect(container.querySelector('[data-testid="pricing-detail-price"]')).toBeTruthy();
-        expect(container.textContent).toContain("Pricing · Model details");
-        expect(container.textContent).toContain("能力与价格");
-        expect(container.textContent).toContain("模型说明");
-        expect(container.textContent).toContain("调用示例");
-        expect(container.querySelector('a[href="/pricing"]')).toBeTruthy();
+        expect(container.querySelector('[data-testid="pricing-page"]')).toBeTruthy();
+        expect(container.querySelector('[data-testid="pricing-detail"]')).toBeNull();
         window.history.pushState({}, "", "/pricing");
     });
 
