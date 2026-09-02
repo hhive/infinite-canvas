@@ -106,6 +106,14 @@ afterEach(() => {
 });
 
 describe("ModelsPage", () => {
+    it("uses the new Pricing page visual structure and view toggle", () => {
+        expect(container.querySelector('[data-testid="pricing-page"]')).toBeTruthy();
+        expect(container.querySelector("aside")).toBeTruthy();
+        const tableToggle = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("表格"));
+        expect(tableToggle).toBeTruthy();
+        act(() => tableToggle?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+        expect(container.querySelector("table")).toBeTruthy();
+    });
     it("renders marketplace cards under their Sub2API group headings", () => {
         const imageGroup = container.querySelector('[data-testid="marketplace-group-1"]');
         const creativeGroup = container.querySelector('[data-testid="marketplace-group-2"]');

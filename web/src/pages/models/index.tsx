@@ -192,9 +192,9 @@ export default function ModelsPage() {
     if (!data) return null;
 
     return (
-        <div className="h-full overflow-y-auto bg-background px-4 py-8 text-stone-800 dark:text-stone-100 sm:px-6">
+        <div data-testid="pricing-page" className="h-full overflow-y-auto bg-stone-50 text-stone-800 dark:bg-stone-950 dark:text-stone-100 sm:px-6">
             <div className="mx-auto w-full max-w-[1800px]">
-                <header className="mx-auto mb-8 max-w-3xl pt-4 text-center sm:pt-8"><h1 className="text-4xl font-bold tracking-tight">模型广场</h1><p className="mt-3 text-sm text-stone-500 dark:text-stone-400">发现可用模型，比较能力与实际售价。</p></header>
+                <header className="mx-auto mb-8 max-w-3xl border-b border-stone-200 bg-white px-5 pb-7 pt-8 text-center shadow-sm dark:border-stone-800 dark:bg-stone-900 sm:rounded-xl sm:px-8 sm:pt-10"><div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-stone-400">Pricing</div><h1 className="text-4xl font-bold tracking-tight">模型广场</h1><p className="mt-3 text-sm text-stone-500 dark:text-stone-400">发现可用模型，比较能力与实际售价。</p></header>
                 <div className="mb-8 grid gap-5 xl:grid-cols-[260px_minmax(0,1fr)]">
                 <aside className="hidden h-fit rounded-lg border border-stone-200 bg-white p-4 xl:block dark:border-stone-800 dark:bg-stone-950"><div className="mb-4 text-sm font-semibold">筛选与排序</div><div className="space-y-4"><div><div className="mb-2 text-xs text-stone-500">媒体类型</div><Segmented block options={mediaOptions} value={mediaFilter} onChange={(value) => setMediaFilter(value as MediaFilter)} /></div><div><div className="mb-2 text-xs text-stone-500">供应商</div><Select className="w-full" value={providerFilter} options={[{ label: "全部供应商", value: "" }, ...providers.map((provider) => ({ label: provider, value: provider }))]} onChange={setProviderFilter} /></div><Button block icon={<RotateCcw className="size-4" />} disabled={!hasFilters} onClick={clearFilters}>清空筛选</Button></div></aside>
                 <main className="min-w-0">
