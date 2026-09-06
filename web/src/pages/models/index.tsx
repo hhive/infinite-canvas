@@ -22,10 +22,10 @@ function quota(value?: number) {
     return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : "-";
 }
 
-function videoResolutionPriceText(model: MarketplaceModel) {
+function videoResolutionPriceText(model: MarketplaceModel, includeUnit = true) {
     const unit = model.charge_mode === "second" ? "秒" : "条";
     return (model.supported_resolutions ?? [])
-        .map((resolution) => `${resolution} ${quota(model.resolution_prices?.[resolution])} / ${unit}`)
+        .map((resolution) => `${resolution} ${quota(model.resolution_prices?.[resolution])}${includeUnit ? ` / ${unit}` : ""}`)
         .join(" · ");
 }
 
@@ -119,6 +119,45 @@ function ImageModelDetails({ model, fields }: { model: MarketplaceModel; fields:
             {fields.includes("prices") && resolutionPrice ? <div>分辨率价格：{resolutionPrice}</div> : null}
             {fields.includes("prices") && qualityPrice ? <div>质量价格：{qualityPrice}</div> : null}
             {fields.includes("prices") && resolutionPrice && qualityPrice ? <div>分辨率和质量同时传入时，按两者中较高价格计费。</div> : null}
+        </div>
+    );
+}
+
+function ModelTable({ models, fields, onSelect }: { models: MarketplaceModel[]; fields: string[]; onSelect: (model: MarketplaceModel) => void }) {
+    const showPrices = fields.includes("prices");
+    const showProvider = fields.includes("provider");
+    return (
+        <div className="max-w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
+            <table className="w-full min-w-[900px] table-fixed text-left text-sm">
+                <thead className="bg-stone-50 text-xs text-stone-500 dark:bg-stone-900">
+                    <tr>
+                        <th scope="col" className="w-[22%] px-4 py-3">模型</th>
+                        <th scope="col" className="w-16 px-4 py-3">类型</th>
+                        {showProvider ? <th scope="col" className="w-[12%] px-4 py-3">供应商</th> : null}
+                        <th scope="col" className="w-24 px-4 py-3">计费方式</th>
+                        {showPrices ? <><th scope="col" className="px-4 py-3">分辨率价格</th><th scope="col" className="w-[18%] px-4 py-3">质量价格</th></> : null}
+                        <th scope="col" className="w-20 px-4 py-3">操作</th>
+                    </tr>
+                </thead>
+                <tbody>{models.map((model) => {
+                    const isImage = model.media_type === "image";
+                    const resolutionPrice = isImage ? priceText(model, resolutionLabels) : videoResolutionPriceText(model, false);
+                    return <tr key={`${model.media_type}-${modelName(model)}-${model.charge_mode || "default"}`} className="border-t border-stone-200 align-top hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900">
+                        <td className="px-4 py-3"><ModelNames model={model} /></td>
+                        <td className="px-4 py-3">{isImage ? "图片" : "视频"}</td>
+                        {showProvider ? <td className="break-words px-4 py-3 text-stone-500 [overflow-wrap:anywhere]">{model.provider || "-"}</td> : null}
+                        <td className="px-4 py-3">{isImage ? "按张" : model.charge_mode === "second" ? "按秒" : "按条"}</td>
+                        {showPrices ? <>
+                            <td className="space-y-1 break-words px-4 py-3 [overflow-wrap:anywhere]">
+                                <div className="font-semibold leading-6">{resolutionPrice ? `${isImage ? "" : "预扣额度："}${resolutionPrice}` : "-"}</div>
+                                {!isImage && model.supports_face === true ? <div className="text-xs leading-5 text-stone-500">卡脸附加预扣额度：{quota(model.face_price)} / {model.charge_mode === "second" ? "秒" : "条"}</div> : null}
+                            </td>
+                            <td className="break-words px-4 py-3 font-semibold leading-6">{isImage ? priceText(model, qualityLabels) || "-" : "-"}</td>
+                        </> : null}
+                        <td className="px-4 py-3"><button type="button" aria-label="查看模型详情" className="text-sm font-medium text-blue-600" onClick={() => onSelect(model)}>详情</button></td>
+                    </tr>;
+                })}</tbody>
+            </table>
         </div>
     );
 }
@@ -227,7 +266,7 @@ export default function ModelsPage() {
                     </div>
                     <PricingToolbar matched={matchedModels} total={totalModels} sortLabel={sortLabel} />
                 </div>
-                {filteredGroups.map((group) => <section key={group.id} data-testid={`marketplace-group-${group.id}`} className="mb-10"><header className="mb-4 flex items-end justify-between gap-4 border-b border-stone-200 pb-3 dark:border-stone-800"><h2 className="text-xl font-semibold">{group.name}</h2><span className="text-sm text-stone-500">{group.models.length} 个模型</span></header>{viewMode === "table" ? <div className="overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800"><table className="w-full text-left text-sm"><thead className="bg-stone-50 text-xs uppercase text-stone-500 dark:bg-stone-900"><tr><th className="px-4 py-3">模型</th><th className="px-4 py-3">类型</th><th className="px-4 py-3">供应商</th><th className="px-4 py-3">价格</th><th className="px-4 py-3">操作</th></tr></thead><tbody>{group.models.map((model) => <tr key={`${group.id}-${model.media_type}-${modelName(model)}-${model.charge_mode || "default"}`} className="border-t border-stone-200 hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"><td className="px-4 py-3"><ModelNames model={model} /></td><td className="px-4 py-3">{model.media_type === "image" ? "图片" : "视频"}</td><td className="px-4 py-3 text-stone-500">{model.provider || "-"}</td><td className="px-4 py-3 font-semibold">{quota(modelPrice(model))}</td><td className="px-4 py-3"><button type="button" aria-label="查看模型详情" className="text-sm font-medium text-blue-600" onClick={() => setSelected(model)}>详情</button></td></tr>)}</tbody></table></div> : <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{group.models.map((model) => <article key={`${group.id}-${model.media_type}-${modelName(model)}-${model.charge_mode || "default"}`} className="rounded-lg border border-stone-200 bg-white p-5 transition hover:-translate-y-0.5 hover:border-stone-400 hover:shadow-sm dark:border-stone-800 dark:bg-stone-950 dark:hover:border-stone-600"><div className="mb-3 flex items-start justify-between gap-3"><ModelNames model={model} /><Tag color={model.media_type === "image" ? "blue" : "purple"}>{model.media_type === "image" ? "图片" : "视频"}</Tag></div><div className="mb-3 flex items-end justify-between gap-3"><div><div className="text-xs uppercase tracking-wide text-stone-400">起始价格</div><div className="text-2xl font-bold">{quota(modelPrice(model))}<span className="ml-1 text-xs font-normal text-stone-400">{priceUnit === "thousand" ? "/ 1K" : priceMode === "quota" ? "额度" : "起"}</span></div></div><div className="flex items-center gap-1"><button type="button" aria-label="查看模型详情" className="rounded-md px-2 py-1 text-sm font-medium text-blue-600 hover:bg-blue-50" onClick={() => setSelected(model)}>详情</button><Button type="text" aria-label="复制模型名称" icon={<Copy className="size-4" />} onClick={(event) => { event.stopPropagation(); void copy(modelName(model)); }} /></div></div>{model.note?.trim() ? <p className="mb-3 whitespace-pre-wrap break-words text-sm text-stone-600 dark:text-stone-300">{model.note.trim()}</p> : null}{model.media_type === "image" ? <ImageModelDetails model={model} fields={data.fields} /> : <><div className="mb-3 text-xs text-stone-500">参考素材：{model.max_reference_images || 0} 图 / {model.max_reference_videos || 0} 视频 / {model.max_reference_audios || 0} 音频<br />支持秒数：{model.supported_seconds?.join(" / ") || "-"}<br />支持分辨率：{model.supported_resolutions?.join(" / ") || "-"}<br />支持人脸：{model.supports_face === false ? "不支持" : "支持"}<br />计费方式：{model.charge_mode === "second" ? "按秒" : "按条"}</div>{videoResolutionPriceText(model) ? <div className="text-sm font-semibold">分辨率预扣额度：{videoResolutionPriceText(model)}</div> : null}{model.supports_face === true ? <div className="text-xs font-normal text-stone-500">卡脸附加预扣额度：{quota(model.face_price)} / {model.charge_mode === "second" ? "秒" : "条"}</div> : null}</>}{hasField("provider") ? <div className="mt-3 text-xs text-stone-500">{model.provider || "未注明供应商"}</div> : null}</article>)}</div>}</section>)}
+                {filteredGroups.map((group) => <section key={group.id} data-testid={`marketplace-group-${group.id}`} className="mb-10"><header className="mb-4 flex items-end justify-between gap-4 border-b border-stone-200 pb-3 dark:border-stone-800"><h2 className="text-xl font-semibold">{group.name}</h2><span className="text-sm text-stone-500">{group.models.length} 个模型</span></header>{viewMode === "table" ? <ModelTable models={group.models} fields={data.fields} onSelect={setSelected} /> : <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{group.models.map((model) => <article key={`${group.id}-${model.media_type}-${modelName(model)}-${model.charge_mode || "default"}`} className="rounded-lg border border-stone-200 bg-white p-5 transition hover:-translate-y-0.5 hover:border-stone-400 hover:shadow-sm dark:border-stone-800 dark:bg-stone-950 dark:hover:border-stone-600"><div className="mb-3 flex items-start justify-between gap-3"><ModelNames model={model} /><Tag color={model.media_type === "image" ? "blue" : "purple"}>{model.media_type === "image" ? "图片" : "视频"}</Tag></div><div className="mb-3 flex items-end justify-between gap-3"><div><div className="text-xs uppercase tracking-wide text-stone-400">起始价格</div><div className="text-2xl font-bold">{quota(modelPrice(model))}<span className="ml-1 text-xs font-normal text-stone-400">{priceUnit === "thousand" ? "/ 1K" : priceMode === "quota" ? "额度" : "起"}</span></div></div><div className="flex items-center gap-1"><button type="button" aria-label="查看模型详情" className="rounded-md px-2 py-1 text-sm font-medium text-blue-600 hover:bg-blue-50" onClick={() => setSelected(model)}>详情</button><Button type="text" aria-label="复制模型名称" icon={<Copy className="size-4" />} onClick={(event) => { event.stopPropagation(); void copy(modelName(model)); }} /></div></div>{model.note?.trim() ? <p className="mb-3 whitespace-pre-wrap break-words text-sm text-stone-600 dark:text-stone-300">{model.note.trim()}</p> : null}{model.media_type === "image" ? <ImageModelDetails model={model} fields={data.fields} /> : <><div className="mb-3 text-xs text-stone-500">参考素材：{model.max_reference_images || 0} 图 / {model.max_reference_videos || 0} 视频 / {model.max_reference_audios || 0} 音频<br />支持秒数：{model.supported_seconds?.join(" / ") || "-"}<br />支持分辨率：{model.supported_resolutions?.join(" / ") || "-"}<br />支持人脸：{model.supports_face === false ? "不支持" : "支持"}<br />计费方式：{model.charge_mode === "second" ? "按秒" : "按条"}</div>{videoResolutionPriceText(model) ? <div className="text-sm font-semibold">分辨率预扣额度：{videoResolutionPriceText(model)}</div> : null}{model.supports_face === true ? <div className="text-xs font-normal text-stone-500">卡脸附加预扣额度：{quota(model.face_price)} / {model.charge_mode === "second" ? "秒" : "条"}</div> : null}</>}{hasField("provider") ? <div className="mt-3 text-xs text-stone-500">{model.provider || "未注明供应商"}</div> : null}</article>)}</div>}</section>)}
                 {totalModels === 0 ? <Empty description="暂无可展示模型" /> : null}
                 {totalModels > 0 && matchedModels === 0 ? <div className="py-12 text-center"><Empty description="没有符合当前筛选条件的模型" />{hasFilters ? <Button className="mt-4" icon={<RotateCcw className="size-4" />} onClick={clearFilters}>清空筛选</Button> : null}</div> : null}
                 </main></div>

@@ -40,6 +40,7 @@ vi.mock("lucide-react", () => ({
 }));
 
 import ModelsPage, { expandMarketplaceModels } from "@/pages/models";
+import type { MarketplaceResponse } from "@/services/api/model-catalog";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -108,6 +109,65 @@ afterEach(() => {
 });
 
 describe("ModelsPage", () => {
+    const showTable = () => act(() => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "表格")?.click());
+    const reloadCatalog = async (update: (catalog: MarketplaceResponse) => void) => {
+        const catalog = structuredClone(await fetchModelCatalog.mock.results[0].value) as MarketplaceResponse;
+        update(catalog);
+        fetchModelCatalog.mockResolvedValue(catalog);
+        act(() => root.unmount());
+        root = createRoot(container);
+        await act(async () => root.render(createElement(ModelsPage)));
+        showTable();
+    };
+
+    it("shows image dimension prices and video resolution quotas in table rows", () => {
+        showTable();
+        const tables = container.querySelectorAll("table");
+        expect(Array.from(tables[0].querySelectorAll("th")).map((cell) => cell.textContent)).toEqual(["模型", "类型", "供应商", "计费方式", "分辨率价格", "质量价格", "操作"]);
+        const [image, video] = tables[0].querySelectorAll<HTMLTableRowElement>("tbody tr");
+        expect(image.cells[3].textContent).toBe("按张");
+        expect(image.cells[4].textContent).toContain("1K 1 · 2K 2");
+        expect(image.cells[5].textContent).toContain("低 0.5 · 高 3");
+        expect(video.cells[3].textContent).toBe("按秒");
+        expect(video.cells[4].firstElementChild?.textContent).toBe("预扣额度：720p 1.25 · 1k 1.75");
+        expect(video.cells[4].textContent).toContain("卡脸附加预扣额度：0.5 / 秒");
+        expect(video.cells[5].textContent).toBe("-");
+        const empty = tables[1].querySelector("tbody tr") as HTMLTableRowElement;
+        expect(empty.cells[4].textContent).toBe("-");
+        expect(empty.cells[5].textContent).toBe("-");
+        act(() => image.querySelector<HTMLButtonElement>('[aria-label="查看模型详情"]')?.click());
+        expect(container.querySelector('[data-testid="pricing-detail-drawer"]')?.textContent).toContain(longCallExample);
+    });
+
+    it("keeps billing-specific video prices, missing resolutions and zero face fees distinct", async () => {
+        await reloadCatalog((catalog) => {
+            Object.assign(catalog.groups[0].models[1], {
+                charge_modes: ["cnt", "second"],
+                charge_mode_prices: { cnt: { "720p": 3.6 }, second: { "720p": 0.28 } },
+                charge_mode_face_prices: { cnt: 0, second: 0.05 },
+            });
+        });
+        const rows = Array.from(container.querySelectorAll<HTMLTableRowElement>("tbody tr")).filter((row) => row.textContent?.includes("video-public"));
+        expect(rows).toHaveLength(2);
+        expect(rows[0].cells[3].textContent).toBe("按条");
+        expect(rows[0].cells[4].firstElementChild?.textContent).toBe("预扣额度：720p 3.6 · 1k -");
+        expect(rows[0].cells[4].textContent).toContain("卡脸附加预扣额度：0 / 条");
+        expect(rows[1].cells[3].textContent).toBe("按秒");
+        expect(rows[1].cells[4].firstElementChild?.textContent).toBe("预扣额度：720p 0.28 · 1k -");
+        expect(rows[1].cells[4].textContent).toContain("卡脸附加预扣额度：0.05 / 秒");
+    });
+
+    it("respects catalog price and provider visibility in table view", async () => {
+        await reloadCatalog((catalog) => { catalog.fields = ["sizes", "qualities", "video_capabilities"]; });
+        const table = container.querySelector("table")!;
+        expect(table.textContent).not.toContain("分辨率价格");
+        expect(table.textContent).not.toContain("质量价格");
+        expect(table.textContent).not.toContain("附加预扣额度");
+        expect(table.textContent).not.toContain("供应商");
+        expect(table.textContent).not.toContain("OpenAI");
+        expect(table.textContent).not.toContain("1.25");
+    });
+
     it("uses the new Pricing page visual structure and view toggle", () => {
         expect(container.querySelector('[data-testid="pricing-page"]')).toBeTruthy();
         expect(container.textContent).toContain("Pricing · 3 models");
