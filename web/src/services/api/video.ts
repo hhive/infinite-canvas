@@ -172,7 +172,7 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
                 seconds,
                 size,
                 resolution,
-                charge_mode: modelConfig.charge_mode || "cnt",
+                charge_mode: normalizeVideoChargeMode(config.videoChargeMode),
                 supports_face: true,
                 generate_audio: true,
                 watermark: false,
@@ -188,6 +188,10 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     } catch (error) {
         throw new Error(readAxiosError(error, "视频任务创建失败"));
     }
+}
+
+function normalizeVideoChargeMode(value: string | undefined): "cnt" | "second" {
+    return value === "second" ? "second" : "cnt";
 }
 
 export async function pollVideoGenerationTask(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationTaskState> {

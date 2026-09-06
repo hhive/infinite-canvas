@@ -134,6 +134,20 @@ describe("media video task API", () => {
         expect(vi.mocked(axios.post).mock.calls[0]?.[1]).not.toHaveProperty("model_config_id");
     });
 
+    it("uses the selected per-second charge mode when creating a Media video task", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: [{ id: 7, model: "upstream-video", model_name: "media-video-create", media_type: "video" }] });
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: { task_id: "video-second", status: "queued", model_config_id: 7, model: "media-video-create" } });
+        const selectedChargeMode = { ...config("media-video-create", "secret-key"), videoChargeMode: "second" } as AiConfig;
+
+        await createVideoGenerationTask(selectedChargeMode, "ocean at dusk");
+
+        expect(axios.post).toHaveBeenCalledWith(
+            "/v1/videos",
+            expect.objectContaining({ charge_mode: "second" }),
+            expect.anything(),
+        );
+    });
+
     it("resolves video models from the standard list envelope", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: { object: "list", data: [{ id: 7, model: "upstream-video", model_name: "media-video-create", media_type: "video" }] } });
         vi.mocked(axios.post).mockResolvedValueOnce({ data: { task_id: "video-envelope", status: "queued", model_config_id: 7, model: "media-video-create", poll_after_ms: 1500 } });

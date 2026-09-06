@@ -20,6 +20,10 @@ const videoModeOptions = [
     { value: "frames", labelKey: "frames" },
     { value: "reference", labelKey: "reference" },
 ];
+const videoChargeModeOptions = [
+    { value: "cnt", labelKey: "cnt" },
+    { value: "second", labelKey: "second" },
+] as const;
 
 export const videoResolutionOptions = resolutionOptions.map((item) => ({ value: item.value, label: item.label }));
 export const videoSizeOptions = videoRatioOptions.map((item) => ({ value: item.value, get label() { return item.value === "auto" ? i18n.t("settingsPanels.common.auto") : item.value; } }));
@@ -27,7 +31,7 @@ export const videoSecondsRange = { min: VIDEO_SECONDS_MIN, max: VIDEO_SECONDS_MA
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode", value: string) => void;
+    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoMode" | "videoChargeMode", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -43,6 +47,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
     }
     const seconds = Number(clampVideoSeconds(config.videoSeconds || "6"));
     const videoMode = normalizeVideoModeValue(config.videoMode);
+    const videoChargeMode = normalizeVideoChargeMode(config.videoChargeMode);
     const resolution = parseVideoResolution(config.vquality);
     const selectedRatio = inferVideoRatio(config.size || "auto");
     const dimensions = readVideoDimensions(config.size || "auto", resolution, selectedRatio);
@@ -109,12 +114,14 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         ))}
                     </div>
                 </SettingGroup>
+                <ChargeModeGroup value={videoChargeMode} onConfigChange={onConfigChange} theme={theme} />
             </div>
         </ImageSettingsTheme>
     );
 }
 
 function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, className, supportedSeconds }: VideoSettingsPanelProps & { supportedSeconds?: number[] }) {
+    const { t } = useTranslation();
     const model = modelOptionName(config.model || config.videoModel);
     const resolution = normalizeSeedanceResolution(config.vquality, model);
     const ratio = normalizeSeedanceRatio(config.size);
@@ -160,6 +167,7 @@ function SeedanceVideoSettingsPanel({ config, onConfigChange, theme, showTitle, 
                         <SwitchRow label="生成声音" checked={generateAudio} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} />
                     </div>
                 </SettingGroup>
+                <ChargeModeGroup value={normalizeVideoChargeMode(config.videoChargeMode)} onConfigChange={onConfigChange} theme={theme} t={t} />
             </div>
         </ImageSettingsTheme>
     );
@@ -185,6 +193,14 @@ export function videoModeLabel(value: string) {
     return i18n.t(`settingsPanels.video.modes.${normalizeVideoModeValue(value)}`);
 }
 
+export function normalizeVideoChargeMode(value: string | undefined): "cnt" | "second" {
+    return value === "second" ? "second" : "cnt";
+}
+
+export function videoChargeModeLabel(value: string | undefined) {
+    return i18n.t(`settingsPanels.video.chargeModes.${normalizeVideoChargeMode(value)}`);
+}
+
 export function normalizeVideoModeValue(value: string | undefined) {
     return value === "reference" ? "reference" : "frames";
 }
@@ -207,9 +223,23 @@ function updateDimension(key: "width" | "height", value: number | null, dimensio
 
 function OptionPill({ selected, disabled = false, theme, onClick, children }: { selected: boolean; disabled?: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
     return (
-        <button type="button" disabled={disabled} className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-35" style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
+        <button type="button" aria-pressed={selected} disabled={disabled} className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-35" style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>
             {children}
         </button>
+    );
+}
+
+function ChargeModeGroup({ value, onConfigChange, theme, t = i18n.t }: { value: "cnt" | "second"; onConfigChange: VideoSettingsPanelProps["onConfigChange"]; theme: CanvasTheme; t?: (key: string) => string }) {
+    return (
+        <SettingGroup title={t("settingsPanels.video.chargeMode")} color={theme.node.muted}>
+            <div className="grid grid-cols-2 gap-2.5">
+                {videoChargeModeOptions.map((item) => (
+                    <OptionPill key={item.value} selected={value === item.value} theme={theme} onClick={() => onConfigChange("videoChargeMode", item.value)}>
+                        {t(`settingsPanels.video.chargeModes.${item.labelKey}`)}
+                    </OptionPill>
+                ))}
+            </div>
+        </SettingGroup>
     );
 }
 

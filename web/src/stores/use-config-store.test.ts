@@ -18,6 +18,10 @@ beforeEach(() => {
     });
 });
 
+it("defaults video charge mode to count-based billing", () => {
+    expect((defaultConfig as unknown as { videoChargeMode: string }).videoChargeMode).toBe("cnt");
+});
+
 function imageModel(id: number, model: string, displayName = model): MediaModel {
     return { id, mediaType: "image", model, displayName, providerName: "provider", apiMode: "images", priceQuota: id };
 }

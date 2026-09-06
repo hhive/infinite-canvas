@@ -24,7 +24,6 @@ vi.mock("localforage", () => ({
 }));
 
 vi.mock("nanoid", () => ({ nanoid: () => "fixed-id" }));
-vi.mock("@/lib/image-utils", () => ({ readImageMeta: vi.fn(async () => ({ width: 2, height: 3, mimeType: "image/jpeg" })) }));
 
 import { getImageBlob, IMAGE_UPLOAD_ACCEPT, imageMimeTypeFromFilename, imageToDataUrl, setImageBlob, uploadGeneratedImage, uploadImage } from "@/services/image-storage";
 
@@ -55,6 +54,16 @@ describe("image storage MIME normalization", () => {
         vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => ({
             blob: async () => objectUrlBlobs.get(String(input)) || new Blob(),
         })));
+        vi.stubGlobal("Image", class {
+            naturalWidth = 2;
+            naturalHeight = 3;
+            onload: (() => void) | null = null;
+            onerror: (() => void) | null = null;
+
+            set src(_value: string) {
+                queueMicrotask(() => this.onload?.());
+            }
+        });
     });
 
     afterEach(() => vi.unstubAllGlobals());
