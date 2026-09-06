@@ -17,6 +17,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const mediaRequest = useRef(0);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const config = useConfigStore((state) => state.config);
+    const importChannelCredentials = useConfigStore((state) => state.importChannelCredentials);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const clearAPIKeys = useConfigStore((state) => state.clearAPIKeys);
     const setCookieSessionReady = useConfigStore((state) => state.setCookieSessionReady);
@@ -29,9 +30,20 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     useEffect(() => {
         if (!shouldInitializeClientRoot(window.location.pathname)) return;
         if (handledConfigParams.current) return;
+        const searchParams = new URLSearchParams(window.location.search);
+        const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
         const { apiKey, sub2apiLaunch, cleanUrl } = readImageLaunchParams(window.location);
         handledConfigParams.current = true;
         window.history.replaceState(null, "", cleanUrl);
+        if (baseUrl && !sub2apiLaunch) {
+            const result = importChannelCredentials({ baseUrl, apiKey });
+            openConfigDialog(false, "channels");
+            if (result.status === "created") message.success(t("config.importedChannelCreated", { name: result.channelName }));
+            else if (result.status === "updated") message.success(t("config.importedChannelUpdated", { name: result.channelName }));
+            else if (result.status === "missing-base-url") message.error(t("config.importedChannelBaseUrlRequired"));
+            else message.error(t("config.importedChannelBaseUrlInvalid"));
+            return;
+        }
         const firstChannel = config.channels[0];
         const authentication = resolveImageLaunchAuthentication({ apiKey, sub2apiLaunch }, firstChannel?.apiKey || "");
         setCookieSessionReady(false);
@@ -83,7 +95,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     setMediaModelsError(capability, error instanceof Error ? error.message : "读取媒体模型失败", status === 401);
                 });
         }
-    }, [applyMediaModels, clearAPIKeys, config.channels, message, openConfigDialog, setCookieSessionReady, setMediaModelsError, setMediaModelsLoading, t, updateConfig]);
+    }, [applyMediaModels, clearAPIKeys, config.channels, importChannelCredentials, message, openConfigDialog, setCookieSessionReady, setMediaModelsError, setMediaModelsLoading, t, updateConfig]);
 
     return <>{children}</>;
 }

@@ -64,7 +64,7 @@ describe("image storage MIME normalization", () => {
         const originalDataUrl = await readAsDataUrl(input);
 
         const uploaded = await uploadImage(input);
-        const stored = await getImageBlob(uploaded.storageKey);
+        const stored = await getImageBlob(uploaded.storageKey!);
 
         expect(uploaded.storageKey).toBe("image:fixed-id");
         expect(stored).toBeInstanceOf(Blob);
@@ -120,7 +120,7 @@ describe("image storage MIME normalization", () => {
         const input = new File([JPEG_BYTES], filename, { type: browserMime });
 
         const uploaded = await uploadImage(input);
-        const stored = await getImageBlob(uploaded.storageKey);
+        const stored = await getImageBlob(uploaded.storageKey!);
 
         expect(stored?.type).toBe("image/jpeg");
         expect(stored?.size).toBe(JPEG_BYTES.byteLength);
@@ -133,7 +133,7 @@ describe("image storage MIME normalization", () => {
         const bytes = filename.endsWith(".png") ? PNG_BYTES : WEBP_BYTES;
         const uploaded = await uploadImage(new File([bytes], filename, { type: browserMime }));
 
-        expect((await getImageBlob(uploaded.storageKey))?.type).toBe(expected);
+        expect((await getImageBlob(uploaded.storageKey!))?.type).toBe(expected);
     });
 
     it("uses the signature instead of an unsupported filename extension for shared upload callers", async () => {
@@ -142,7 +142,7 @@ describe("image storage MIME normalization", () => {
         expect(imageMimeTypeFromFilename(input.name)).toBeUndefined();
         const uploaded = await uploadImage(input);
 
-        expect((await getImageBlob(uploaded.storageKey))?.type).toBe("image/jpeg");
+        expect((await getImageBlob(uploaded.storageKey!))?.type).toBe("image/jpeg");
     });
 
     it("defines the exact image workbench accept list and filters files with the shared mapping", () => {
@@ -162,7 +162,7 @@ describe("image storage MIME normalization", () => {
         const originalPayload = (await readAsDataUrl(input)).split(",")[1];
 
         const uploaded = await uploadImage(input);
-        const stored = await getImageBlob(uploaded.storageKey);
+        const stored = await getImageBlob(uploaded.storageKey!);
 
         expect(uploaded.mimeType).toBe(expectedMime);
         expect(stored?.type).toBe(expectedMime);

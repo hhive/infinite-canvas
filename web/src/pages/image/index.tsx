@@ -147,7 +147,7 @@ export default function ImagePage() {
                 resumeTask: (taskId, onTask) => resumeImageTask(taskId, effectiveConfig.apiKey, { signal: controller.signal, onTask }),
                 saveAsset: async (image) => {
                     const stored = await uploadGeneratedImage(image.dataUrl);
-                    return { id: image.id, url: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+                    return { id: image.id, url: stored.url, storageKey: stored.storageKey || "", width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                 },
                 saveRecord: saveImageWorkbenchTask,
                 saveLog: async (currentRecord, image) => saveLog({ ...buildLog({
@@ -423,7 +423,7 @@ export default function ImagePage() {
                 const persistedImage = { ...nextImage, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                 setResults((value) => updateResultAt(value, index, { image: persistedImage }));
                 const storedRecord = (await readImageWorkbenchTasks()).find((record) => record.slotId === slotId);
-                if (storedRecord) await saveImageWorkbenchTask({ ...storedRecord, status: "completed", landingStage: "assets_saved", savedImage: { id: image.id, url: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType } });
+                if (storedRecord) await saveImageWorkbenchTask({ ...storedRecord, status: "completed", landingStage: "assets_saved", savedImage: { id: image.id, url: stored.url, storageKey: stored.storageKey || "", width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType } });
                 return persistedImage;
             }).catch((error) => {
                 console.warn("[canvas:image] generated result persistence deferred", { slotId, error: error instanceof Error ? error.message : String(error) });
