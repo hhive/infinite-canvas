@@ -157,6 +157,19 @@ describe("ModelsPage", () => {
         expect(rows[1].cells[4].textContent).toContain("卡脸附加预扣额度：0.05 / 秒");
     });
 
+    it("omits quality prices from video-only tables", async () => {
+        await reloadCatalog((catalog) => {
+            catalog.groups = [catalog.groups[0]];
+            catalog.groups[0].models = catalog.groups[0].models.filter((model) => model.media_type === "video");
+        });
+        const table = container.querySelector("table")!;
+        expect(table.textContent).not.toContain("质量价格");
+        expect(table.querySelectorAll("th")).toHaveLength(6);
+        expect(table.querySelectorAll("tbody tr:first-child td")).toHaveLength(6);
+        expect(table.textContent).toContain("按秒");
+        expect(table.textContent).toContain("720p 1.25");
+    });
+
     it("respects catalog price and provider visibility in table view", async () => {
         await reloadCatalog((catalog) => { catalog.fields = ["sizes", "qualities", "video_capabilities"]; });
         const table = container.querySelector("table")!;

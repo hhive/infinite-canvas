@@ -126,6 +126,7 @@ function ImageModelDetails({ model, fields }: { model: MarketplaceModel; fields:
 function ModelTable({ models, fields, onSelect }: { models: MarketplaceModel[]; fields: string[]; onSelect: (model: MarketplaceModel) => void }) {
     const showPrices = fields.includes("prices");
     const showProvider = fields.includes("provider");
+    const showQualityPrices = showPrices && models.some((model) => model.media_type === "image");
     return (
         <div className="max-w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
             <table className="w-full min-w-[900px] table-fixed text-left text-sm">
@@ -135,7 +136,8 @@ function ModelTable({ models, fields, onSelect }: { models: MarketplaceModel[]; 
                         <th scope="col" className="w-16 px-4 py-3">类型</th>
                         {showProvider ? <th scope="col" className="w-[12%] px-4 py-3">供应商</th> : null}
                         <th scope="col" className="w-24 px-4 py-3">计费方式</th>
-                        {showPrices ? <><th scope="col" className="px-4 py-3">分辨率价格</th><th scope="col" className="w-[18%] px-4 py-3">质量价格</th></> : null}
+                        {showPrices ? <th scope="col" className="px-4 py-3">分辨率价格</th> : null}
+                        {showQualityPrices ? <th scope="col" className="w-[18%] px-4 py-3">质量价格</th> : null}
                         <th scope="col" className="w-20 px-4 py-3">操作</th>
                     </tr>
                 </thead>
@@ -152,7 +154,7 @@ function ModelTable({ models, fields, onSelect }: { models: MarketplaceModel[]; 
                                 <div className="font-semibold leading-6">{resolutionPrice ? `${isImage ? "" : "预扣额度："}${resolutionPrice}` : "-"}</div>
                                 {!isImage && model.supports_face === true ? <div className="text-xs leading-5 text-stone-500">卡脸附加预扣额度：{quota(model.face_price)} / {model.charge_mode === "second" ? "秒" : "条"}</div> : null}
                             </td>
-                            <td className="break-words px-4 py-3 font-semibold leading-6">{isImage ? priceText(model, qualityLabels) || "-" : "-"}</td>
+                            {showQualityPrices ? <td className="break-words px-4 py-3 font-semibold leading-6">{isImage ? priceText(model, qualityLabels) || "-" : "-"}</td> : null}
                         </> : null}
                         <td className="px-4 py-3"><button type="button" aria-label="查看模型详情" className="text-sm font-medium text-blue-600" onClick={() => onSelect(model)}>详情</button></td>
                     </tr>;
