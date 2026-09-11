@@ -14,7 +14,6 @@ const qualityOptions = [
     { value: "low", labelKey: "low" },
 ];
 const DIMENSION_STEP = 16;
-const IMAGE_MIN_PIXELS = 655360;
 
 export const imageQualityOptions = qualityOptions.map((item) => ({ value: item.value, get label() { return i18n.t(`settingsPanels.common.${item.labelKey}`); } }));
 export const imageAspectOptions = mediaRatioOptions.map((item) => ({ value: item.value, label: item.value === "auto" ? i18n.t("settingsPanels.common.auto") : item.value }));
@@ -37,11 +36,10 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const transparentBackground = config.background === "transparent";
-    const sizeOptions = { step: snapDimensionToStep ? DIMENSION_STEP : 1, minPixels: IMAGE_MIN_PIXELS };
     const selectedScale = inferMediaScale(activeSize);
     const selectedRatio = inferMediaRatio(activeSize);
-    const dimensions = readMediaDimensions(activeSize, selectedScale, selectedRatio, sizeOptions);
-    const applySize = (scale: string, ratio: string) => onConfigChange("size", computeMediaSize(scale, ratio === "auto" ? "auto" : ratio, sizeOptions));
+    const dimensions = readMediaDimensions(activeSize, selectedScale, selectedRatio);
+    const applySize = (scale: string, ratio: string) => onConfigChange("size", computeMediaSize(scale, ratio));
     const selectScale = (scale: string) => applySize(scale, selectedRatio === "auto" ? "1:1" : selectedRatio);
     const selectRatio = (ratio: string) => applySize(selectedScale, ratio);
     const updateDimension = (key: "width" | "height", value: number | null) => {

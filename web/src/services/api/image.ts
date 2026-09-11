@@ -7,6 +7,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { dataUrlToBlob, imageToDataUrl } from "@/services/image-storage";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
+import { imageSizePresets, inferMediaScale } from "@/lib/media-size";
 import type { ReferenceImage } from "@/types/image";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
@@ -233,6 +234,9 @@ function normalizeBackground(background: string | undefined) {
 /** Map "quality + ratio" to an explicit pixel dimension like "3840x2160". */
 function resolveSize(quality: string | undefined, ratio: string): string {
     const parsedRatio = parseImageRatio(ratio);
+    const scale = quality === "high" ? "4k" : quality === "medium" || quality === "hd" ? "2k" : "1k";
+    const preset = imageSizePresets[scale][ratio];
+    if (preset) return preset;
     const basePixels = quality ? QUALITY_BASE[quality] : undefined;
     const isLandscape = parsedRatio.width >= parsedRatio.height;
     const longRatio = isLandscape ? parsedRatio.width / parsedRatio.height : parsedRatio.height / parsedRatio.width;
@@ -316,6 +320,9 @@ function resolveGeminiImageSize(quality: string, dimensions: { width: number; he
     const normalizedQuality = normalizeQuality(quality);
     if (normalizedQuality) return GEMINI_IMAGE_SIZE_BY_QUALITY[normalizedQuality];
     if (!dimensions) return undefined;
+    const size = `${dimensions.width}x${dimensions.height}`;
+    const scale = inferMediaScale(size);
+    if (Object.values(imageSizePresets[scale]).includes(size)) return scale.toUpperCase();
     const edge = Math.max(dimensions.width, dimensions.height);
     if (edge <= 768) return "512";
     if (edge <= 1536) return "1K";
