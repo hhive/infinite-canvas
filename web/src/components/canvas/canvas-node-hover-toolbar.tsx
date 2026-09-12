@@ -36,6 +36,7 @@ type CanvasNodeHoverToolbarProps = {
     onReversePrompt: (node: CanvasNodeData) => void;
     onReverseVideoPrompt: (node: CanvasNodeData) => void;
     onProductionBoard: (node: CanvasNodeData) => void;
+    onRenderProductionBoard: (node: CanvasNodeData) => void;
     onRetry: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onDelete: (node: CanvasNodeData) => void;
@@ -76,6 +77,7 @@ export function CanvasNodeHoverToolbar({
     onReversePrompt,
     onReverseVideoPrompt,
     onProductionBoard,
+    onRenderProductionBoard,
     onRetry,
     onToggleFreeResize,
     onDelete,
@@ -120,6 +122,8 @@ export function CanvasNodeHoverToolbar({
     const hasVideo = isVideo && Boolean(node.metadata?.content);
     const hasAudio = isAudio && Boolean(node.metadata?.content);
     const isText = node.type === CanvasNodeType.Text;
+    // 制作规划表的分析文本节点：可以随时按当前内容重渲染板面，不再重新调用模型。
+    const isProductionBoardAnalysis = node.metadata?.productionBoardRole === "analysis";
     const isConfig = node.type === CanvasNodeType.Config;
     const canRetry = node.metadata?.status === "error" && !(isVideo && Boolean(node.metadata?.videoTaskId) && !hasVideo);
     const canQueryVideoTask = isVideo && Boolean(node.metadata?.videoTaskId) && !hasVideo && node.metadata?.status !== "loading";
@@ -154,6 +158,7 @@ export function CanvasNodeHoverToolbar({
         ...(isVideo ? [{ id: "edit", title: t("common.edit"), label: t("common.edit"), icon: <MessageSquare className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(hasVideo ? [{ id: "reverseVideoPrompt", title: t("canvas.nodeToolbar.reverseVideoPromptTitle"), label: t("canvas.nodeToolbar.reverseVideoPrompt"), icon: <FileText className="size-4" />, onClick: () => onReverseVideoPrompt(node) }] : []),
         ...(hasVideo ? [{ id: "productionBoard", title: t("canvas.nodeToolbar.productionBoardTitle"), label: t("canvas.nodeToolbar.productionBoard"), icon: <LayoutGrid className="size-4" />, onClick: () => onProductionBoard(node) }] : []),
+        ...(isProductionBoardAnalysis ? [{ id: "renderProductionBoard", title: t("canvas.nodeToolbar.renderProductionBoardTitle"), label: t("canvas.nodeToolbar.renderProductionBoard"), icon: <LayoutGrid className="size-4" />, onClick: () => onRenderProductionBoard(node) }] : []),
         ...(isText ? [{ id: "generateImage", title: t("canvas.node.generateImage"), label: t("canvas.node.generate"), icon: <ImageIcon className="size-4" />, onClick: () => onGenerateImage(node) }] : []),
         ...(isConfig ? [{ id: "config", title: t("canvas.configNode.title"), label: t("canvas.configNode.title"), icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
         ...(isText ? [{ id: "decreaseFont", title: t("canvas.nodeToolbar.decreaseFont"), label: t("canvas.nodeToolbar.zoomOut"), icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
