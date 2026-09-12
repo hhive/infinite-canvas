@@ -8,8 +8,31 @@ export type UploadedFile = { url: string; storageKey: string; bytes: number; mim
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
 const objectUrls = new Map<string, string>();
 
+const MEDIA_RESPONSE_ERROR = "媒体地址返回的不是媒体内容";
+
+/**
+ * 错误页与 JSON 错误体判定。
+ *
+ * 必须拦在落盘之前：归档链接在路由缺失期间返回的是画布 SPA 的 index.html，状态码却是 200，
+ * 一旦被当作视频写进 IndexedDB，节点此后永久不可播且刷新也无法自愈——远端修好了本地仍是坏缓存。
+ * 空 content-type 不拦：部分正常的存储服务不返回类型头，拦了会误伤。
+ */
+export function isNonMediaContentType(contentType: string) {
+    const type = contentType.split(";")[0].trim().toLowerCase();
+    return type.startsWith("text/") || type === "application/json" || type === "application/xml" || type === "application/xhtml+xml";
+}
+
+export async function fetchMediaBlob(url: string) {
+    const response = await fetch(withLocalProxy(url));
+    if (!response.ok) throw new Error(`${MEDIA_RESPONSE_ERROR}（HTTP ${response.status}）`);
+    const contentType = response.headers.get("content-type") || "";
+    if (isNonMediaContentType(contentType)) throw new Error(`${MEDIA_RESPONSE_ERROR}（${contentType}）`);
+    return await response.blob();
+}
+
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
-    const blob = typeof input === "string" ? await (await fetch(withLocalProxy(input))).blob() : input;
+    const blob = typeof input === "string" ? await fetchMediaBlob(input) : input;
+    if (isNonMediaContentType(blob.type)) throw new Error(`${MEDIA_RESPONSE_ERROR}（${blob.type}）`);
     const storageKey = `${prefix}:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
