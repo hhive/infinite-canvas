@@ -21,6 +21,7 @@ vi.mock("localforage", () => ({
 
 vi.mock("nanoid", () => ({ nanoid: () => "fixed-id" }));
 
+import { storeGeneratedAudio } from "@/services/api/audio";
 import { storeGeneratedVideo } from "@/services/api/video";
 import { uploadMediaFile } from "@/services/file-storage";
 
@@ -63,13 +64,15 @@ function stubMediaElements() {
         tag === "video" || tag === "audio" ? fake() : originalCreateElement(tag as "div", options as never)) as typeof document.createElement);
 }
 
-describe("uploadMediaFile 响应校验", () => {
+const createObjectUrlMock = vi.fn((blob: Blob) => `blob:mock/${blob.size}`);
+
+describe("媒体落盘前的响应类型校验", () => {
     beforeEach(() => {
         storage.clear();
         setItemMock.mockClear();
-        let objectUrlIndex = 0;
+        createObjectUrlMock.mockClear();
         vi.stubGlobal("URL", {
-            createObjectURL: vi.fn(() => `blob:mock/${++objectUrlIndex}`),
+            createObjectURL: createObjectUrlMock,
             revokeObjectURL: vi.fn(),
         });
         stubMediaElements();
@@ -99,6 +102,23 @@ describe("uploadMediaFile 响应校验", () => {
         stubFetch(responseFor(HTML_ERROR_PAGE, { status: 404, contentType: "text/html" }));
 
         await expect(uploadMediaFile("https://media.example.test/file_task/x.mp4", "video")).rejects.toThrow();
+        expect(setItemMock).not.toHaveBeenCalled();
+    });
+
+    it("非 2xx 但 content-type 看似媒体时也要拒绝（状态码守卫不得被 content-type 判定遮盖）", async () => {
+        // 404 + application/octet-stream 不会命中非媒体判定，只有 !response.ok 能拦下它；
+        // 若后续有人精简掉状态码判断，这条用例必须变红。
+        stubFetch(responseFor(new Uint8Array([0, 1, 2, 3]), { status: 404, contentType: "application/octet-stream" }));
+
+        await expect(uploadMediaFile("https://media.example.test/file_task/x.mp4", "video")).rejects.toThrow();
+        expect(setItemMock).not.toHaveBeenCalled();
+    });
+
+    it("失败路径不得产生 blob 对象 URL（既不能落盘也不能泄漏）", async () => {
+        stubFetch(responseFor(HTML_ERROR_PAGE, { contentType: "text/html" }));
+
+        await expect(uploadMediaFile("https://media.example.test/file_task/x.mp4", "video")).rejects.toThrow();
+        expect(createObjectUrlMock).not.toHaveBeenCalled();
         expect(setItemMock).not.toHaveBeenCalled();
     });
 
@@ -135,5 +155,19 @@ describe("uploadMediaFile 响应校验", () => {
         expect(stored.url).toBe("https://media.example.test/file_task/x.mp4");
         expect(stored.storageKey).toBe("");
         expect(setItemMock).not.toHaveBeenCalled();
+    });
+
+    // 音频侧会在落盘前把内容强制改写成 audio/*，改写之后 uploadMediaFile 的类型判定就失效了，
+    // 因此闸门必须在改写之前；插件与非插件两条音频路径都汇入 storeGeneratedAudio。
+    it("音频：text/html 内容不得被改写成 audio/* 后落盘", async () => {
+        await expect(storeGeneratedAudio(new Blob([HTML_ERROR_PAGE], { type: "text/html" }), "mp3")).rejects.toThrow();
+        expect(setItemMock).not.toHaveBeenCalled();
+    });
+
+    it("音频：正常 audio/* 内容照常落盘", async () => {
+        const stored = await storeGeneratedAudio(new Blob([new Uint8Array([1, 2, 3])], { type: "audio/mpeg" }), "mp3");
+
+        expect(stored.storageKey).toBe("audio:fixed-id");
+        expect(setItemMock).toHaveBeenCalledTimes(1);
     });
 });

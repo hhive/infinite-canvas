@@ -2,7 +2,7 @@ import axios from "axios";
 
 import i18n from "@/i18n";
 import { audioMimeType, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
-import { fetchMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { assertMediaBlob, fetchMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
 
@@ -83,6 +83,9 @@ async function audioPluginBlob(result: unknown, format: string): Promise<Blob> {
 }
 
 export async function storeGeneratedAudio(blob: Blob, format = "mp3"): Promise<UploadedFile> {
+    // 必须先过闸再改写类型：下面的改写会把任意内容标成 audio/*，之后 uploadMediaFile 的类型
+    // 判定就失效了，错误页会被永久写进本地缓存且刷新不自愈。插件与非插件两条音频路径都汇入这里。
+    assertMediaBlob(blob);
     const audio = blob.type.startsWith("audio/") ? blob : new Blob([blob], { type: audioMimeType(format) });
     return uploadMediaFile(audio, "audio");
 }

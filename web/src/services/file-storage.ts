@@ -17,7 +17,7 @@ const MEDIA_RESPONSE_ERROR = "媒体地址返回的不是媒体内容";
  * 一旦被当作视频写进 IndexedDB，节点此后永久不可播且刷新也无法自愈——远端修好了本地仍是坏缓存。
  * 空 content-type 不拦：部分正常的存储服务不返回类型头，拦了会误伤。
  */
-export function isNonMediaContentType(contentType: string) {
+function isNonMediaContentType(contentType: string) {
     const type = contentType.split(";")[0].trim().toLowerCase();
     return type.startsWith("text/") || type === "application/json" || type === "application/xml" || type === "application/xhtml+xml";
 }
@@ -30,9 +30,19 @@ export async function fetchMediaBlob(url: string) {
     return await response.blob();
 }
 
+/**
+ * 落盘前的最后一道闸。
+ *
+ * 调用方可能在拿到 blob 后把它改写成媒体类型（例如音频侧把任意内容标成 `audio/*`），
+ * 一旦如此，`uploadMediaFile` 的 Blob 分支就再也拦不住错误页了，所以改写之前必须先过这道闸。
+ */
+export function assertMediaBlob(blob: Blob) {
+    if (isNonMediaContentType(blob.type)) throw new Error(`${MEDIA_RESPONSE_ERROR}（${blob.type}）`);
+}
+
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
     const blob = typeof input === "string" ? await fetchMediaBlob(input) : input;
-    if (isNonMediaContentType(blob.type)) throw new Error(`${MEDIA_RESPONSE_ERROR}（${blob.type}）`);
+    assertMediaBlob(blob);
     const storageKey = `${prefix}:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
