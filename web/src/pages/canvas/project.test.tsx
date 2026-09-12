@@ -662,20 +662,6 @@ describe("制作规划表入口", () => {
         expect(source).toContain('productionBoardRole: "analysis" as const');
     });
 
-    it("切换 API Key 刷新模型目录不会让整块画布重载：取消回调只依赖 Key 字符串", () => {
-        const source = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
-        const matched = /const cancelGenerationTarget = useCallback\(\s*async \(targetNodeId: string\) => \{([\s\S]*?)\n    \}, \[([^\]]*)\]\);/.exec(source);
-        expect(matched, "未能定位 cancelGenerationTarget 的依赖数组").not.toBeNull();
-        const deps = matched![2];
-
-        // 依赖整个 effectiveConfig 会让 applyMediaModels 每次刷新目录都换掉它的引用：
-        // cancelGenerationTarget -> trackCanvasImageTask -> 项目加载 effect 连锁重跑，
-        // effect 首行 setProjectLoaded(false) 会把整块画布换成 CanvasRefreshShell 占位壳。
-        // 闭包里只用到 effectiveConfig.apiKey，依赖必须收敛到该字符串。
-        expect(deps).toContain("effectiveConfig.apiKey");
-        expect(deps).not.toMatch(/\beffectiveConfig\b(?!\.apiKey)/);
-    });
-
     it("工具栏提供生成制作规划表与渲染规划板两个入口并接线到画布", () => {
         const toolbar = readFileSync(resolve(process.cwd(), "src/components/canvas/canvas-node-hover-toolbar.tsx"), "utf8");
         expect(toolbar).toContain("onProductionBoard");
@@ -753,5 +739,22 @@ describe("项目加载 effect 的依赖契约", () => {
         expect(restoreBody, "未能定位 restore 函数体").not.toBeNull();
         expect(restoreBody![1]).toContain("readEffectiveConfig()");
         expect(restoreBody![1]).not.toContain("effectiveConfig.");
+    });
+
+    it("取消生成的回调只依赖 Key 字符串，目录刷新不会让整块画布重载", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
+        // 收尾用 `},\s*[deps],?\s*);` 兼容 prettier 展开成多行的形态：
+        // 原格式（`}, [deps]);` 单行）与 `npm run format` 后的展开格式都能锚定同一个依赖数组，
+        // 否则正则会在展开后一路跨到后面 effect 的依赖数组上，断言张冠李戴。
+        const matched = /const cancelGenerationTarget = useCallback\([\s\S]*?\n\s*\},\s*\[([^\]]*)\],?\s*\);/.exec(source);
+        expect(matched, "未能定位 cancelGenerationTarget 的依赖数组").not.toBeNull();
+        const deps = matched![1];
+
+        // 依赖整个 effectiveConfig 会让 applyMediaModels 每次刷新目录都换掉它的引用：
+        // cancelGenerationTarget -> trackCanvasImageTask -> 项目加载 effect 连锁重跑，
+        // effect 首行 setProjectLoaded(false) 会把整块画布换成 CanvasRefreshShell 占位壳。
+        // 闭包里只用到 effectiveConfig.apiKey，依赖必须收敛到该字符串。
+        expect(deps).toContain("effectiveConfig.apiKey");
+        expect(deps).not.toMatch(/\beffectiveConfig\b(?!\.apiKey)/);
     });
 });
