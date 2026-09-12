@@ -1,13 +1,13 @@
 // 抽帧 Worker 的主线程侧客户端：负责建 Worker、转发请求、把中止信号变成 terminate。
 // 单独成文件是为了让抽帧模块可以在测试里替换掉真实 Worker（jsdom 里没有 Worker 实现）。
-import type { SampledVideoFrame } from "@/lib/canvas/video-frame-sampling-plan";
+import type { VideoFrameSamplingRequest, VideoFrameSamplingResult } from "@/lib/canvas/video-frame-sampling-plan";
 
-export type VideoFrameSamplingRequest = { source: string; count: number; maxEdge: number; quality: number };
+export type { VideoFrameSamplingRequest } from "@/lib/canvas/video-frame-sampling-plan";
 
-type VideoFrameSamplingResponse = { ok: true; frames: SampledVideoFrame[] } | { ok: false; error: { name: string; message: string } };
+type VideoFrameSamplingResponse = ({ ok: true } & VideoFrameSamplingResult) | { ok: false; error: { name: string; message: string } };
 
-export function runVideoFrameSampling(request: VideoFrameSamplingRequest, signal?: AbortSignal): Promise<SampledVideoFrame[]> {
-    return new Promise<SampledVideoFrame[]>((resolve, reject) => {
+export function runVideoFrameSampling(request: VideoFrameSamplingRequest, signal?: AbortSignal): Promise<VideoFrameSamplingResult> {
+    return new Promise<VideoFrameSamplingResult>((resolve, reject) => {
         let worker: Worker;
         try {
             worker = createSamplingWorker();
@@ -31,8 +31,12 @@ export function runVideoFrameSampling(request: VideoFrameSamplingRequest, signal
 
         worker.onmessage = (event: MessageEvent<VideoFrameSamplingResponse>) => {
             const message = event.data;
-            if (message.ok) settle(() => resolve(message.frames));
-            else settle(() => reject(restoreError(message.error)));
+            if (message.ok) {
+                const { ok: _ok, ...result } = message;
+                settle(() => resolve(result));
+            } else {
+                settle(() => reject(restoreError(message.error)));
+            }
         };
         worker.onerror = (event: ErrorEvent) => {
             settle(() => reject(new Error(event.message || "抽帧 Worker 执行失败")));

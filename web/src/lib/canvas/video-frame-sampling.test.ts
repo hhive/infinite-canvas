@@ -6,9 +6,21 @@ vi.mock("@/lib/canvas/video-frame-sampling-runner", () => ({
     runVideoFrameSampling: (...args: unknown[]) => runVideoFrameSampling(...args),
 }));
 
-import { computeTargetSize, DEFAULT_VIDEO_FRAME_MAX_EDGE, DEFAULT_VIDEO_REVERSE_FRAME_COUNT, MAX_VIDEO_REVERSE_FRAME_COUNT, planFrameTimestamps, resolveFrameCount, sampleVideoFrames } from "@/lib/canvas/video-frame-sampling";
+import { computeTargetSize, DEFAULT_VIDEO_FRAME_MAX_EDGE, DEFAULT_VIDEO_REVERSE_FRAME_RATE, MAX_VIDEO_REVERSE_FRAME_COUNT, sampleVideoFrames } from "@/lib/canvas/video-frame-sampling";
 
-type RunnerRequest = { source: string; count: number; maxEdge: number; quality: number };
+type RunnerRequest = { source: string; frameRate: number; maxFrames: number; maxEdge: number; quality: number };
+
+/** 执行器返回的抽帧结果，测试里按需覆盖字段。 */
+function runnerResult(overrides: Partial<{ frames: { dataUrl: string; timestampMs: number }[]; frameRate: number; durationMs: number; requestedCount: number; truncated: boolean }> = {}) {
+    return {
+        frames: [{ dataUrl: "data:image/jpeg;base64,AA", timestampMs: 0 }],
+        frameRate: DEFAULT_VIDEO_REVERSE_FRAME_RATE,
+        durationMs: 10_000,
+        requestedCount: 20,
+        truncated: false,
+        ...overrides,
+    };
+}
 
 function lastRequest(): RunnerRequest {
     return runVideoFrameSampling.mock.calls.at(-1)?.[0] as RunnerRequest;
@@ -16,65 +28,7 @@ function lastRequest(): RunnerRequest {
 
 beforeEach(() => {
     runVideoFrameSampling.mockReset();
-    runVideoFrameSampling.mockResolvedValue([{ dataUrl: "data:image/jpeg;base64,AA", timestampMs: 0 }]);
-});
-
-describe("resolveFrameCount", () => {
-    it("缺省用默认帧数", () => {
-        expect(resolveFrameCount(undefined)).toBe(DEFAULT_VIDEO_REVERSE_FRAME_COUNT);
-        expect(DEFAULT_VIDEO_REVERSE_FRAME_COUNT).toBe(6);
-    });
-
-    it("超过上限按上限截断", () => {
-        expect(MAX_VIDEO_REVERSE_FRAME_COUNT).toBe(12);
-        expect(resolveFrameCount(20)).toBe(MAX_VIDEO_REVERSE_FRAME_COUNT);
-        expect(resolveFrameCount(MAX_VIDEO_REVERSE_FRAME_COUNT + 1)).toBe(MAX_VIDEO_REVERSE_FRAME_COUNT);
-    });
-
-    it("下限为零：非正数与非法数都归零，由调用方决定是否报错", () => {
-        expect(resolveFrameCount(0)).toBe(0);
-        expect(resolveFrameCount(-3)).toBe(0);
-        expect(resolveFrameCount(Number.NaN)).toBe(0);
-        expect(resolveFrameCount(Number.POSITIVE_INFINITY)).toBe(MAX_VIDEO_REVERSE_FRAME_COUNT);
-    });
-
-    it("小数向下取整", () => {
-        expect(resolveFrameCount(3.9)).toBe(3);
-    });
-});
-
-describe("planFrameTimestamps", () => {
-    it("按时长等间隔规划，取每段中点，避免首尾边界帧", () => {
-        expect(planFrameTimestamps(10_000, 2)).toEqual([2_500, 7_500]);
-        expect(planFrameTimestamps(10_000, 1)).toEqual([5_000]);
-    });
-
-    it("时间戳严格升序且落在 (0, 时长) 开区间内", () => {
-        const timestamps = planFrameTimestamps(9_000, 6);
-        expect(timestamps).toHaveLength(6);
-        for (let index = 1; index < timestamps.length; index += 1) {
-            expect(timestamps[index]).toBeGreaterThan(timestamps[index - 1]);
-        }
-        expect(timestamps[0]).toBeGreaterThan(0);
-        expect(timestamps.at(-1)!).toBeLessThan(9_000);
-    });
-
-    it("间隔均匀：相邻差值最多相差 1 毫秒（取整误差）", () => {
-        const timestamps = planFrameTimestamps(1_000, 6);
-        const gaps = timestamps.slice(1).map((value, index) => value - timestamps[index]);
-        expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1);
-    });
-
-    it("帧数为零时不规划任何时间戳", () => {
-        expect(planFrameTimestamps(10_000, 0)).toEqual([]);
-        expect(planFrameTimestamps(10_000, -1)).toEqual([]);
-    });
-
-    it("时长不可用（非正或非有限）时抛明确错误", () => {
-        expect(() => planFrameTimestamps(0, 3)).toThrow("视频时长无法确定");
-        expect(() => planFrameTimestamps(-1, 3)).toThrow("视频时长无法确定");
-        expect(() => planFrameTimestamps(Number.NaN, 3)).toThrow("视频时长无法确定");
-    });
+    runVideoFrameSampling.mockResolvedValue(runnerResult());
 });
 
 describe("computeTargetSize", () => {
@@ -121,20 +75,28 @@ describe("computeTargetSize", () => {
 });
 
 describe("sampleVideoFrames", () => {
-    it("缺省帧数与长边传给抽帧执行器", async () => {
+    it("缺省速率、上限与长边传给抽帧执行器", async () => {
         await sampleVideoFrames({ source: "blob:video-1" });
-        expect(lastRequest()).toMatchObject({ source: "blob:video-1", count: DEFAULT_VIDEO_REVERSE_FRAME_COUNT, maxEdge: DEFAULT_VIDEO_FRAME_MAX_EDGE, quality: 0.85 });
+        expect(lastRequest()).toMatchObject({ source: "blob:video-1", frameRate: DEFAULT_VIDEO_REVERSE_FRAME_RATE, maxFrames: MAX_VIDEO_REVERSE_FRAME_COUNT, maxEdge: DEFAULT_VIDEO_FRAME_MAX_EDGE, quality: 0.85 });
     });
 
-    it("帧数超过上限时按上限截断后再执行", async () => {
-        await sampleVideoFrames({ source: "blob:video-1", count: 99 });
-        expect(lastRequest().count).toBe(MAX_VIDEO_REVERSE_FRAME_COUNT);
+    it("速率越界（含非法值）收敛后再执行", async () => {
+        await sampleVideoFrames({ source: "blob:video-1", frameRate: 9 });
+        expect(lastRequest().frameRate).toBe(5);
+        await sampleVideoFrames({ source: "blob:video-1", frameRate: 0 });
+        expect(lastRequest().frameRate).toBe(1);
+        await sampleVideoFrames({ source: "blob:video-1", frameRate: Number.NaN });
+        expect(lastRequest().frameRate).toBe(DEFAULT_VIDEO_REVERSE_FRAME_RATE);
     });
 
-    it("帧数非正时抛明确错误且不启动抽帧", async () => {
-        await expect(sampleVideoFrames({ source: "blob:video-1", count: 0 })).rejects.toThrow("抽帧数量必须大于 0");
-        await expect(sampleVideoFrames({ source: "blob:video-1", count: -2 })).rejects.toThrow("抽帧数量必须大于 0");
-        expect(runVideoFrameSampling).not.toHaveBeenCalled();
+    it("总帧数上限可调，但不会超过硬上限", async () => {
+        await sampleVideoFrames({ source: "blob:video-1", maxFrames: 5 });
+        expect(lastRequest().maxFrames).toBe(5);
+        await sampleVideoFrames({ source: "blob:video-1", maxFrames: 999 });
+        expect(lastRequest().maxFrames).toBe(MAX_VIDEO_REVERSE_FRAME_COUNT);
+        // 上限非法时不放大也不缩小，回落到硬上限。
+        await sampleVideoFrames({ source: "blob:video-1", maxFrames: 0 });
+        expect(lastRequest().maxFrames).toBe(MAX_VIDEO_REVERSE_FRAME_COUNT);
     });
 
     it("地址为空时抛明确错误", async () => {
@@ -142,18 +104,34 @@ describe("sampleVideoFrames", () => {
         expect(runVideoFrameSampling).not.toHaveBeenCalled();
     });
 
+    it("把截断信息透传给调用方，便于在消息里说明采样是稀疏的", async () => {
+        runVideoFrameSampling.mockResolvedValue(runnerResult({ frameRate: 5, durationMs: 120_000, requestedCount: 600, truncated: true, frames: [{ dataUrl: "data:image/jpeg;base64,A", timestampMs: 2_000 }] }));
+
+        const result = await sampleVideoFrames({ source: "blob:video-1", frameRate: 5 });
+
+        expect(result.truncated).toBe(true);
+        expect(result.frameRate).toBe(5);
+        expect(result.durationMs).toBe(120_000);
+        expect(result.requestedCount).toBe(600);
+        expect(result.frames).toHaveLength(1);
+    });
+
     it("输出按时间戳升序，乱序结果也会被排序", async () => {
-        runVideoFrameSampling.mockResolvedValue([
-            { dataUrl: "data:image/jpeg;base64,C", timestampMs: 900 },
-            { dataUrl: "data:image/jpeg;base64,A", timestampMs: 100 },
-            { dataUrl: "data:image/jpeg;base64,B", timestampMs: 500 },
-        ]);
-        const frames = await sampleVideoFrames({ source: "blob:video-1" });
-        expect(frames.map((frame) => frame.timestampMs)).toEqual([100, 500, 900]);
+        runVideoFrameSampling.mockResolvedValue(
+            runnerResult({
+                frames: [
+                    { dataUrl: "data:image/jpeg;base64,C", timestampMs: 900 },
+                    { dataUrl: "data:image/jpeg;base64,A", timestampMs: 100 },
+                    { dataUrl: "data:image/jpeg;base64,B", timestampMs: 500 },
+                ],
+            }),
+        );
+        const result = await sampleVideoFrames({ source: "blob:video-1" });
+        expect(result.frames.map((frame) => frame.timestampMs)).toEqual([100, 500, 900]);
     });
 
     it("不伪造成功：执行器返回空数组时抛错", async () => {
-        runVideoFrameSampling.mockResolvedValue([]);
+        runVideoFrameSampling.mockResolvedValue(runnerResult({ frames: [] }));
         await expect(sampleVideoFrames({ source: "blob:video-1" })).rejects.toThrow("未能从视频中解出任何帧");
     });
 
@@ -174,7 +152,7 @@ describe("sampleVideoFrames", () => {
         runVideoFrameSampling.mockImplementation(async (_request: RunnerRequest, signal?: AbortSignal) => {
             controller.abort();
             expect(signal).toBe(controller.signal);
-            return [{ dataUrl: "data:image/jpeg;base64,AA", timestampMs: 100 }];
+            return runnerResult({ frames: [{ dataUrl: "data:image/jpeg;base64,AA", timestampMs: 100 }] });
         });
         await expect(sampleVideoFrames({ source: "blob:video-1", signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
     });

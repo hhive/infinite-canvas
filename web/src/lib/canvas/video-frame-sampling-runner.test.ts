@@ -37,17 +37,26 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-const request = { source: "https://media.test/v1.mp4", count: 6, maxEdge: 768, quality: 0.85 };
+const request = { source: "https://media.test/v1.mp4", frameRate: 2, maxFrames: 30, maxEdge: 768, quality: 0.85 };
+const result = { frames: [{ dataUrl: "data:image/jpeg;base64,AA", timestampMs: 200 }], frameRate: 2, durationMs: 10_000, requestedCount: 20, truncated: false };
 
 describe("runVideoFrameSampling 的 Worker 协议", () => {
-    it("把请求转发给 Worker，并把 Worker 回传的帧解析出来", async () => {
+    it("把请求转发给 Worker，并把 Worker 回传的帧与截断信息解析出来", async () => {
         const pending = runVideoFrameSampling(request);
         expect(workers[0].posted).toEqual([request]);
 
-        workers[0].onmessage!({ data: { ok: true, frames: [{ dataUrl: "data:image/jpeg;base64,AA", timestampMs: 200 }] } } as MessageEvent);
+        workers[0].onmessage!({ data: { ok: true, ...result } } as MessageEvent);
 
-        await expect(pending).resolves.toEqual([{ dataUrl: "data:image/jpeg;base64,AA", timestampMs: 200 }]);
+        await expect(pending).resolves.toEqual(result);
         expect(workers[0].terminated).toBe(true);
+    });
+
+    it("Worker 回传的截断标志原样透传，不在这里自行推断", async () => {
+        const truncated = { ...result, frameRate: 5, durationMs: 120_000, requestedCount: 600, truncated: true };
+        const pending = runVideoFrameSampling({ ...request, frameRate: 5 });
+        workers[0].onmessage!({ data: { ok: true, ...truncated } } as MessageEvent);
+
+        await expect(pending).resolves.toEqual(truncated);
     });
 
     it("还原 Worker 侧的错误名称与消息，不让错误细节丢失", async () => {
@@ -70,7 +79,7 @@ describe("runVideoFrameSampling 的 Worker 协议", () => {
         expect(workers[0].terminated).toBe(true);
 
         // 中止后即使 Worker 再回传结果也不能当成功。
-        workers[0].onmessage?.({ data: { ok: true, frames: [{ dataUrl: "data:image/jpeg;base64,AA", timestampMs: 200 }] } } as MessageEvent);
+        workers[0].onmessage?.({ data: { ok: true, ...result } } as MessageEvent);
         await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     });
 

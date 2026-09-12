@@ -6,10 +6,13 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes, getGroupResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
-import { sampleVideoFrames, type SampledVideoFrame } from "@/lib/canvas/video-frame-sampling";
+import { sampleVideoFrames, type SampledVideoFrame, type VideoFrameSamplingSummary } from "@/lib/canvas/video-frame-sampling";
+import { resolveFrameRate } from "@/lib/canvas/video-frame-sampling-plan";
 
-/** 一个参考视频抽出的帧；抽帧失败的视频保留占位，frames 为空数组。 */
-export type NodeGenerationVideoFrames = { videoId: string; frames: SampledVideoFrame[] };
+export type { VideoFrameSamplingSummary } from "@/lib/canvas/video-frame-sampling";
+
+/** 一个参考视频抽出的帧；抽帧失败的视频保留占位，frames 为空数组、sampling 为 null。 */
+export type NodeGenerationVideoFrames = { videoId: string; frames: SampledVideoFrame[]; sampling: VideoFrameSamplingSummary | null };
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -17,6 +20,8 @@ export type NodeGenerationContext = {
     referenceVideos: ReferenceVideo[];
     referenceAudios: ReferenceAudio[];
     videoFrames: NodeGenerationVideoFrames[];
+    /** 抽帧速率（帧/秒），取自配置节点 metadata，缺省 2。 */
+    videoFrameRate: number;
     textCount: number;
     imageCount: number;
     videoCount: number;
@@ -45,8 +50,10 @@ export type NodeGenerationInput = NodeGenerationResourceInput | NodeGenerationGr
 export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string): NodeGenerationContext {
     const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
     const sourceNode = nodes.find((node) => node.id === nodeId);
+    // 抽帧速率是「被生成的那个节点」上的设置：视频反推时用户改的是配置节点的文本模式设置。
+    const videoFrameRate = resolveFrameRate(sourceNode?.metadata?.videoFrameRate);
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
-        return buildComposerGenerationContext(inputs, prompt);
+        return buildComposerGenerationContext(inputs, prompt, videoFrameRate);
     }
 
     const resourceInputs = flattenGenerationInputs(inputs);
@@ -63,6 +70,7 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         referenceAudios,
         // 抽帧是异步的，放在 hydrateNodeGenerationContext 里补齐；这里只保证结构完整。
         videoFrames: [],
+        videoFrameRate,
         textCount: resourceInputs.filter((input) => input.type === "text").length,
         imageCount: referenceImages.length,
         videoCount: referenceVideos.length,
@@ -70,7 +78,7 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     };
 }
 
-function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext {
+function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string, videoFrameRate: number): NodeGenerationContext {
     const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
     const selectedInputs: NodeGenerationResourceInput[] = [];
     const labelByNodeId = new Map<string, string>();
@@ -114,6 +122,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
             referenceVideos: [],
             referenceAudios: [],
             videoFrames: [],
+            videoFrameRate,
             textCount: 0,
             imageCount: 0,
             videoCount: 0,
@@ -127,6 +136,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
         referenceVideos,
         referenceAudios,
         videoFrames: [],
+        videoFrameRate,
         textCount: counts.text,
         imageCount: referenceImages.length,
         videoCount: referenceVideos.length,
@@ -170,13 +180,24 @@ export function videoFrameLabel(videoIndex: number, frameIndex: number, timestam
     return `【视频${videoIndex} 第${frameIndex}帧 @${(timestampMs / 1000).toFixed(1)} s】`;
 }
 
+/**
+ * 抽帧被上限截断时的说明，插在该视频的帧标注之前。
+ * 逐帧静态图本身看不出采样密度，模型会把 30 张稀疏帧当成连续时间轴去脑补中间过程，
+ * 所以必须明说「总时长 / 按速率本该抽多少帧 / 实际只抽了多少帧」。
+ */
+export function videoFrameTruncationNotice(videoIndex: number, sampling: VideoFrameSamplingSummary) {
+    return `【参考视频${videoIndex} 共 ${(sampling.durationMs / 1000).toFixed(1)} 秒，按 ${sampling.frameRate} 帧/秒需 ${sampling.requestedCount} 帧，已按上限抽取 ${sampling.frameCount} 帧】`;
+}
+
 export function buildNodeResponseMessages(context: NodeGenerationContext): AiTextMessage[] {
-    const videoFrameMessages = context.videoFrames.flatMap((video, videoIndex) =>
-        video.frames.flatMap((frame, frameIndex) => [
+    const videoFrameMessages = context.videoFrames.flatMap((video, videoIndex) => [
+        // 截断说明只加在被截断的视频上，未截断的视频保持原有「帧标注 + 帧图」的紧凑形式。
+        ...(video.sampling?.truncated ? [{ type: "text" as const, text: videoFrameTruncationNotice(videoIndex + 1, video.sampling) }] : []),
+        ...video.frames.flatMap((frame, frameIndex) => [
             { type: "text" as const, text: videoFrameLabel(videoIndex + 1, frameIndex + 1, frame.timestampMs) },
             { type: "image_url" as const, image_url: { url: frame.dataUrl } },
         ]),
-    );
+    ]);
     if (!context.referenceImages.length && !videoFrameMessages.length) {
         return [{ role: "user", content: context.prompt }];
     }
@@ -192,7 +213,7 @@ export function buildNodeResponseMessages(context: NodeGenerationContext): AiTex
 export async function hydrateNodeGenerationContext(context: NodeGenerationContext) {
     // 先把两个动态依赖一起取回来，图片 hydrate 与视频抽帧才能真正在同一个 tick 里并发启动。
     const [{ imageToDataUrl }, { resolveMediaUrl }] = await Promise.all([import("@/services/image-storage"), import("@/services/file-storage")]);
-    const [referenceImages, videoFrames] = await Promise.all([Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))), hydrateVideoFrames(context.referenceVideos, resolveMediaUrl)]);
+    const [referenceImages, videoFrames] = await Promise.all([Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))), hydrateVideoFrames(context.referenceVideos, resolveMediaUrl, resolveFrameRate(context.videoFrameRate))]);
     return { ...context, referenceImages, videoFrames };
 }
 
@@ -202,10 +223,15 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
  * 视频反推本来就是增强能力，失败时退回到「只有提示词与图片」的既有链路即可。
  * 失败的视频仍保留占位项，这样帧标注里的「视频N」编号始终与参考视频列表的顺序一致。
  */
-async function hydrateVideoFrames(videos: ReferenceVideo[], resolveMediaUrl: (storageKey?: string, fallback?: string) => Promise<string>): Promise<NodeGenerationVideoFrames[]> {
+async function hydrateVideoFrames(videos: ReferenceVideo[], resolveMediaUrl: (storageKey?: string, fallback?: string) => Promise<string>, frameRate: number): Promise<NodeGenerationVideoFrames[]> {
     if (!videos.length) return [];
-    const results = await Promise.allSettled(videos.map(async (video): Promise<NodeGenerationVideoFrames> => ({ videoId: video.id, frames: await sampleVideoFrames({ source: await resolveMediaUrl(video.storageKey, video.url) }) })));
-    return results.map((result, index) => (result.status === "fulfilled" ? result.value : { videoId: videos[index].id, frames: [] }));
+    const results = await Promise.allSettled(
+        videos.map(async (video): Promise<NodeGenerationVideoFrames> => {
+            const { frames, ...sampling } = await sampleVideoFrames({ source: await resolveMediaUrl(video.storageKey, video.url), frameRate });
+            return { videoId: video.id, frames, sampling };
+        }),
+    );
+    return results.map((result, index) => (result.status === "fulfilled" ? result.value : { videoId: videos[index].id, frames: [], sampling: null }));
 }
 
 function readNodeTextInput(node: CanvasNodeData) {

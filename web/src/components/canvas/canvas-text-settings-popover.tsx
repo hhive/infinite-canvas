@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Settings2 } from "lucide-react";
-import { Button, InputNumber } from "antd";
+import { Button, InputNumber, Select } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { reasoningEffortLabel, TextSettingsPanel } from "@/components/text-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { DEFAULT_VIDEO_REVERSE_FRAME_RATE, MAX_VIDEO_REVERSE_FRAME_RATE, MIN_VIDEO_REVERSE_FRAME_RATE } from "@/lib/canvas/video-frame-sampling-plan";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig, ReasoningEffort } from "@/stores/use-config-store";
 
@@ -14,11 +15,14 @@ type CanvasTextSettingsPopoverProps = {
     onConfigChange: (key: "reasoningEffort", value: ReasoningEffort) => void;
     count?: number;
     onCountChange?: (count: number) => void;
+    /** 视频抽帧速率（帧/秒）；不提供 onFrameRateChange 时不渲染这一项。 */
+    frameRate?: number;
+    onFrameRateChange?: (frameRate: number) => void;
     buttonClassName?: string;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
 };
 
-export function CanvasTextSettingsPopover({ config, onConfigChange, count, onCountChange, buttonClassName, placement = "topLeft" }: CanvasTextSettingsPopoverProps) {
+export function CanvasTextSettingsPopover({ config, onConfigChange, count, onCountChange, frameRate, onFrameRateChange, buttonClassName, placement = "topLeft" }: CanvasTextSettingsPopoverProps) {
     const { t } = useTranslation();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
@@ -45,7 +49,7 @@ export function CanvasTextSettingsPopover({ config, onConfigChange, count, onCou
         };
     }, [open]);
 
-    const panel = open && buttonRect ? <TextSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} count={count} onConfigChange={onConfigChange} onCountChange={onCountChange} /> : null;
+    const panel = open && buttonRect ? <TextSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} count={count} onConfigChange={onConfigChange} onCountChange={onCountChange} frameRate={frameRate} onFrameRateChange={onFrameRateChange} /> : null;
 
     return (
         <>
@@ -59,7 +63,7 @@ export function CanvasTextSettingsPopover({ config, onConfigChange, count, onCou
     );
 }
 
-function TextSettingsPortal({ buttonRect, panelRef, placement, theme, config, count, onConfigChange, onCountChange }: {
+function TextSettingsPortal({ buttonRect, panelRef, placement, theme, config, count, onConfigChange, onCountChange, frameRate, onFrameRateChange }: {
     buttonRect: DOMRect;
     panelRef: RefObject<HTMLDivElement | null>;
     placement: CanvasTextSettingsPopoverProps["placement"];
@@ -68,6 +72,8 @@ function TextSettingsPortal({ buttonRect, panelRef, placement, theme, config, co
     count?: number;
     onConfigChange: CanvasTextSettingsPopoverProps["onConfigChange"];
     onCountChange?: (count: number) => void;
+    frameRate?: number;
+    onFrameRateChange?: (frameRate: number) => void;
 }) {
     const { t } = useTranslation();
     const width = 356;
@@ -99,7 +105,28 @@ function TextSettingsPortal({ buttonRect, panelRef, placement, theme, config, co
                     <InputNumber className="w-full" min={1} max={15} precision={0} value={count} onChange={(value) => onCountChange(value || 1)} />
                 </div>
             ) : null}
+            {onFrameRateChange ? (
+                <div className="mt-4 space-y-2.5">
+                    <div className="text-sm font-medium" style={{ color: theme.node.muted }}>{t("settingsPanels.text.frameRate")}</div>
+                    <Select
+                        aria-label={t("settingsPanels.text.frameRate")}
+                        className="w-full"
+                        value={frameRate ?? DEFAULT_VIDEO_REVERSE_FRAME_RATE}
+                        onChange={(value) => onFrameRateChange(value)}
+                        options={frameRateOptions(t("settingsPanels.text.frameRateUnit"))}
+                    />
+                    <div className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>{t("settingsPanels.text.frameRateHint")}</div>
+                </div>
+            ) : null}
         </div>,
         document.body,
     );
+}
+
+/** 速率选项从常量区间推导：改上下限时 UI 自动跟着变，不需要单独维护一份列表。 */
+function frameRateOptions(unit: string) {
+    return Array.from({ length: MAX_VIDEO_REVERSE_FRAME_RATE - MIN_VIDEO_REVERSE_FRAME_RATE + 1 }, (_, index) => {
+        const rate = MIN_VIDEO_REVERSE_FRAME_RATE + index;
+        return { value: rate, label: `${rate} ${unit}` };
+    });
 }

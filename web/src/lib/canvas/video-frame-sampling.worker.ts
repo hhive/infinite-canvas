@@ -6,11 +6,9 @@
 // 因此这里沿用 DOM 的 self 类型；运行时由 Worker 全局作用域提供 postMessage/onmessage/FileReader/OffscreenCanvas。
 import { ALL_FORMATS, BlobSource, Input, UrlSource, VideoSampleSink, type VideoSample } from "mediabunny";
 
-import { computeTargetSize, planFrameTimestamps, type SampledVideoFrame } from "@/lib/canvas/video-frame-sampling-plan";
+import { computeTargetSize, planVideoFrameTimestamps, type SampledVideoFrame, type VideoFrameSamplingRequest, type VideoFrameSamplingResult } from "@/lib/canvas/video-frame-sampling-plan";
 
-export type VideoFrameSamplingRequest = { source: string; count: number; maxEdge: number; quality: number };
-
-type VideoFrameSamplingResponse = { ok: true; frames: SampledVideoFrame[] } | { ok: false; error: { name: string; message: string } };
+type VideoFrameSamplingResponse = ({ ok: true } & VideoFrameSamplingResult) | { ok: false; error: { name: string; message: string } };
 
 /** 编码/轨道层面的确定性失败：重试整文件读取也不会有不同结果，不做整文件回退。 */
 class UnsupportedVideoError extends Error {
@@ -26,8 +24,8 @@ self.onmessage = (event: MessageEvent<VideoFrameSamplingRequest>) => {
 
 async function respond(request: VideoFrameSamplingRequest) {
     try {
-        const frames = await sampleVideoFramesInWorker(request);
-        postMessage({ ok: true, frames } satisfies VideoFrameSamplingResponse);
+        const result = await sampleVideoFramesInWorker(request);
+        postMessage({ ok: true, ...result } satisfies VideoFrameSamplingResponse);
     } catch (error) {
         postMessage({
             ok: false,
@@ -36,7 +34,7 @@ async function respond(request: VideoFrameSamplingRequest) {
     }
 }
 
-async function sampleVideoFramesInWorker(request: VideoFrameSamplingRequest): Promise<SampledVideoFrame[]> {
+async function sampleVideoFramesInWorker(request: VideoFrameSamplingRequest): Promise<VideoFrameSamplingResult> {
     // 优先按需分段读取：UrlSource 会按 HTTP Range 只拉解码所需的片段，避免把整个视频下载下来。
     // 服务端不支持 Range、CORS 受限、或读取中途失败时，回退为整文件 BlobSource。
     if (!/^(blob:|data:)/i.test(request.source)) {
@@ -60,18 +58,21 @@ async function fetchBlob(source: string): Promise<Blob> {
     return response.blob();
 }
 
-async function sampleFramesFromInput(input: Input, request: VideoFrameSamplingRequest): Promise<SampledVideoFrame[]> {
+async function sampleFramesFromInput(input: Input, request: VideoFrameSamplingRequest): Promise<VideoFrameSamplingResult> {
     try {
         const track = await input.getPrimaryVideoTrack();
         if (!track) throw new UnsupportedVideoError("视频中没有可用的视频轨道");
         if (!(await track.canDecode())) throw new UnsupportedVideoError("该视频编码无法在当前浏览器中解码");
 
         const durationSeconds = await readDurationSeconds(input);
+        const durationMs = Math.round(durationSeconds * 1000);
         const target = computeTargetSize(await track.getDisplayWidth(), await track.getDisplayHeight(), request.maxEdge);
         const sink = new VideoSampleSink(track);
         const frames: SampledVideoFrame[] = [];
+        // 帧数由时长与速率算出，超过上限时按上限重新等间隔规划；截断标志原样回传给上层。
+        const plan = planVideoFrameTimestamps(durationMs, request.frameRate, request.maxFrames);
 
-        for (const plannedMs of planFrameTimestamps(Math.round(durationSeconds * 1000), request.count)) {
+        for (const plannedMs of plan.timestamps) {
             // 按时间戳取帧：VFR 视频的帧间隔不均匀，按帧号索引会取错位置。
             const sample = await sink.getSample(plannedMs / 1000);
             if (!sample) continue;
@@ -88,7 +89,7 @@ async function sampleFramesFromInput(input: Input, request: VideoFrameSamplingRe
         }
 
         if (!frames.length) throw new Error("未能从视频中解出任何帧，视频可能为空或不可解码");
-        return frames;
+        return { frames, frameRate: request.frameRate, durationMs, requestedCount: plan.requestedCount, frameCount: frames.length, truncated: plan.truncated };
     } finally {
         input.dispose();
     }
