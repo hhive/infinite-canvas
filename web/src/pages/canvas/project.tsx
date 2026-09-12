@@ -610,7 +610,10 @@ function InfiniteCanvasPage() {
         } catch (error) {
             setNodes((prev) => prev.map((node) => node.id === targetNodeId ? { ...node, metadata: { ...node.metadata, errorDetails: error instanceof Error ? `取消失败：${error.message}` : "取消失败，请稍后重试" } } : node));
         }
-    }, [effectiveConfig]);
+        // 只依赖 Key 字符串：依赖整个 effectiveConfig 会让 applyMediaModels 每次刷新模型目录
+        // 都换掉回调引用，连锁触发 trackCanvasImageTask 与项目加载 effect 重跑，
+        // 把整块画布换成占位壳（切 Key 时白闪）并重复 hydrate 图片、恢复任务。
+    }, [effectiveConfig.apiKey]);
 
     const stopGenerationByRunningId = useCallback((runningId: string) => {
         void cancelImageTaskBatch(generationRequestsRef.current, runningId, cancelGenerationTarget);
