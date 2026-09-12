@@ -3,6 +3,10 @@
  *
  * 纯函数模块：不做 IO、不依赖 React、不弹任何提示。文本模型权限由 Sub2API 在调用时校验，
  * 因此这里只按候选顺序尝试，不预先判断某个模型是否真的可用。
+ *
+ * 重试有两个维度：模型（同一次请求内换模型）与 Key（按请求维度换用其他 Media API Key）。
+ * Key 维度只体现在请求头 {@link TextModelAttempt.apiKeyId} 上，绝不切换全局会话 Key——
+ * 会话 Key 是全局的，切换会把正在进行的图片/视频请求一起切走。
  */
 
 /** 反推默认模型：仅当它存在于当前 Key 的文本目录时才使用，避免硬写死目录中不存在的模型导致必失败。 */
@@ -31,6 +35,50 @@ export function resolveTextModelCandidates(selectedModel: string, availableModel
     if (availableModels.some((model) => typeof model === "string" && model.trim() === DEFAULT_REVERSE_TEXT_MODEL)) push(DEFAULT_REVERSE_TEXT_MODEL);
     availableModels.forEach(push);
     return candidates.slice(0, MAX_TEXT_MODEL_ATTEMPTS);
+}
+
+/**
+ * 其他 Key 的尝试上限。Media 会话 Key 是全局的：用户在图片节点选过 Key 后，文本请求会继承那个
+ * 图片分组的 Key，而该分组可能调不动文本模型。这里用请求维度的 Key 重试兜底，但不做组合爆炸：
+ * 每个其他 Key 只用模型候选的首项，且其他 Key 的数量有上限（见本常量）。
+ */
+export const MAX_TEXT_FALLBACK_KEYS = 2;
+
+/**
+ * 总尝试次数硬上限。文本节点支持 count > 1（多条链并行），必须在序列长度上封顶，
+ * 否则用户会长时间卡在重试里。当前会话 Key 的候选上限为 {@link MAX_TEXT_MODEL_ATTEMPTS}（4），
+ * 加上 2 个其他 Key 恰好用满 6 次。
+ */
+export const MAX_TEXT_TOTAL_ATTEMPTS = 6;
+
+/** 一次尝试：`apiKeyId` 为空表示沿用全局会话 Key；存在时作为请求头传给 Media 代理，不改动会话。 */
+export type TextModelAttempt = { apiKeyId?: number; model: string };
+
+/** Key 维度的候选项；`textModelCount` 为该 Key 可见的文本模型数（不可得时为 0）。 */
+export type TextModelFallbackKey = { id: number; textModelCount: number };
+
+/**
+ * 生成有序的尝试序列：先集中试当前会话 Key 配模型候选，再依次换其他 Key。
+ *
+ * 顺序：
+ * 1. 当前会话 Key（`apiKeyId` 为 undefined）依次试全部模型候选，顺序与上限沿用
+ *    {@link resolveTextModelCandidates}。
+ * 2. 其他 Key 按 `textModelCount` 降序、同值按 id 升序，跳过 `textModelCount <= 0` 的 Key
+ *    与当前会话 Key；每个其他 Key 只用模型候选的首项。
+ * 3. 总尝试次数裁剪到 {@link MAX_TEXT_TOTAL_ATTEMPTS}。
+ *
+ * 纯函数：只读传入的 Key 快照，不做 IO、不改全局会话 Key（调用方不得在此切换会话）。
+ */
+export function buildTextModelAttempts(candidates: readonly string[], otherKeys: readonly TextModelFallbackKey[] = [], currentKeyId?: number | null): TextModelAttempt[] {
+    const models = candidates.map((value) => (typeof value === "string" ? value.trim() : "")).filter(Boolean);
+    if (!models.length) return [];
+    const attempts: TextModelAttempt[] = models.map((model) => ({ model }));
+    const fallbackKeys = otherKeys
+        .filter((key) => Number.isSafeInteger(key.id) && key.id > 0 && key.id !== currentKeyId && Number(key.textModelCount) > 0)
+        .sort((left, right) => Number(right.textModelCount) - Number(left.textModelCount) || left.id - right.id)
+        .slice(0, MAX_TEXT_FALLBACK_KEYS);
+    for (const key of fallbackKeys) attempts.push({ apiKeyId: key.id, model: models[0] });
+    return attempts.slice(0, MAX_TEXT_TOTAL_ATTEMPTS);
 }
 
 /** 可切换的 HTTP 状态：鉴权失效、模型/接口不存在、限流、上游 5xx。 */
@@ -97,17 +145,21 @@ export class TextModelFallbackError extends Error {
 }
 
 /**
- * 按候选顺序尝试，返回首个成功结果。
- * 可切换错误继续下一个候选；不可切换错误（参数错误、用户取消）立即抛出；
- * 全部候选失败时抛出 {@link TextModelFallbackError}。
+ * 按 {@link buildTextModelAttempts} 生成的序列尝试，返回首个成功结果。
+ * 可切换错误继续下一个尝试（含换 Key）；不可切换错误（参数错误、用户取消）立即抛出；
+ * 全部失败时抛出 {@link TextModelFallbackError}，其 attemptedModels 按尝试顺序记录实际试过的模型。
  */
-export async function retryTextModelsWithFallback<T>(candidates: readonly string[], attempt: (model: string) => Promise<T>): Promise<T> {
+export async function retryTextModelAttempts<T>(attempts: readonly TextModelAttempt[], attempt: (target: TextModelAttempt) => Promise<T>): Promise<T> {
+    return runTextModelAttempts(attempts, attempt, (target) => target.model);
+}
+
+async function runTextModelAttempts<T, Target>(targets: readonly Target[], attempt: (target: Target) => Promise<T>, modelOf: (target: Target) => string): Promise<T> {
     const attemptedModels: string[] = [];
     let lastError: unknown;
-    for (const model of candidates) {
-        attemptedModels.push(model);
+    for (const target of targets) {
+        attemptedModels.push(modelOf(target));
         try {
-            return await attempt(model);
+            return await attempt(target);
         } catch (error) {
             if (!isSwitchableTextModelError(error)) throw error;
             lastError = error;

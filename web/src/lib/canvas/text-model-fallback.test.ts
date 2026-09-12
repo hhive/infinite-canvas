@@ -3,7 +3,16 @@ import { resolve } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { isSwitchableTextModelError, MAX_TEXT_MODEL_ATTEMPTS, resolveTextModelCandidates, retryTextModelsWithFallback, TextModelFallbackError } from "@/lib/canvas/text-model-fallback";
+import {
+    buildTextModelAttempts,
+    isSwitchableTextModelError,
+    MAX_TEXT_FALLBACK_KEYS,
+    MAX_TEXT_MODEL_ATTEMPTS,
+    MAX_TEXT_TOTAL_ATTEMPTS,
+    resolveTextModelCandidates,
+    retryTextModelAttempts,
+    TextModelFallbackError,
+} from "@/lib/canvas/text-model-fallback";
 
 describe("silent fallback module", () => {
     it("切换模型全程静默：纯函数模块不引入 antd message 或 React", () => {
@@ -11,6 +20,12 @@ describe("silent fallback module", () => {
         expect(source).not.toContain("antd");
         expect(source).not.toMatch(/\bmessage\.(success|error|warning|info|loading|open)\s*\(/);
         expect(source).not.toContain("react");
+    });
+
+    it("Key 维度只做请求维度重试：纯函数模块不接触全局会话 Key（无 store、无 select/activate）", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/lib/canvas/text-model-fallback.ts"), "utf8");
+        expect(source).not.toContain("use-media-api-key-store");
+        expect(source).not.toMatch(/\.(select|activate)\s*\(/);
     });
 });
 
@@ -99,52 +114,127 @@ describe("isSwitchableTextModelError", () => {
     });
 });
 
-describe("retryTextModelsWithFallback", () => {
-    it("首个候选成功时只尝试一次", async () => {
-        const attempt = vi.fn(async (model: string) => `ok:${model}`);
-        await expect(retryTextModelsWithFallback(["a", "b"], attempt)).resolves.toBe("ok:a");
-        expect(attempt).toHaveBeenCalledTimes(1);
+describe("buildTextModelAttempts", () => {
+    it("先集中试当前会话 Key 的模型候选，再按计数降序换其他 Key（其他 Key 只用首项模型）", () => {
+        const attempts = buildTextModelAttempts(["node-model", "catalog-a"], [{ id: 9, textModelCount: 4 }, { id: 3, textModelCount: 12 }], 7);
+        expect(attempts).toEqual([
+            { model: "node-model" },
+            { model: "catalog-a" },
+            { apiKeyId: 3, model: "node-model" },
+            { apiKeyId: 9, model: "node-model" },
+        ]);
     });
 
-    it("可切换失败时按候选顺序继续，返回首个成功结果", async () => {
-        const attempt = vi.fn(async (model: string) => {
-            if (model === "c") return `ok:${model}`;
-            throw new Error(`模型 ${model} 不可用：请求失败：404`);
-        });
-        await expect(retryTextModelsWithFallback(["a", "b", "c"], attempt)).resolves.toBe("ok:c");
-        expect(attempt.mock.calls.map(([model]) => model)).toEqual(["a", "b", "c"]);
+    it("其他 Key 按 textModelCount 降序、同值按 id 升序，并且最多取 2 个", () => {
+        const keys = [
+            { id: 20, textModelCount: 3 },
+            { id: 4, textModelCount: 9 },
+            { id: 8, textModelCount: 9 },
+            { id: 6, textModelCount: 3 },
+        ];
+        const attempts = buildTextModelAttempts(["m"], keys, 99);
+        expect(attempts).toEqual([
+            { model: "m" },
+            { apiKeyId: 4, model: "m" },
+            { apiKeyId: 8, model: "m" },
+        ]);
+        expect(MAX_TEXT_FALLBACK_KEYS).toBe(2);
     });
 
-    it("不可切换错误立即抛出且不再尝试后续候选", async () => {
+    it("跳过没有文本模型的 Key 与当前会话 Key", () => {
+        const keys = [
+            { id: 7, textModelCount: 10 },
+            { id: 5, textModelCount: 0 },
+            { id: 6, textModelCount: 2 },
+        ];
+        expect(buildTextModelAttempts(["m"], keys, 7)).toEqual([
+            { model: "m" },
+            { apiKeyId: 6, model: "m" },
+        ]);
+    });
+
+    it("总尝试次数有硬上限 6，超出时优先保留当前会话 Key 的候选", () => {
+        const candidates = ["m1", "m2", "m3", "m4", "m5"];
+        const attempts = buildTextModelAttempts(candidates, [{ id: 3, textModelCount: 9 }, { id: 4, textModelCount: 8 }], 7);
+        expect(MAX_TEXT_TOTAL_ATTEMPTS).toBe(6);
+        expect(attempts).toHaveLength(MAX_TEXT_TOTAL_ATTEMPTS);
+        expect(attempts.map((item) => item.model)).toEqual(["m1", "m2", "m3", "m4", "m5", "m1"]);
+        expect(attempts.at(-1)).toEqual({ apiKeyId: 3, model: "m1" });
+    });
+
+    it("候选上限为 4 时，当前会话 Key 4 次加其他 Key 2 次正好用满 6 次", () => {
+        const catalog = Array.from({ length: 50 }, (_, index) => `catalog-${index + 1}`);
+        const candidates = resolveTextModelCandidates("node-model", catalog);
+        const attempts = buildTextModelAttempts(candidates, [{ id: 3, textModelCount: 9 }, { id: 4, textModelCount: 8 }], 7);
+        expect(attempts).toHaveLength(6);
+        expect(attempts.filter((item) => item.apiKeyId === undefined)).toHaveLength(MAX_TEXT_MODEL_ATTEMPTS);
+    });
+
+    it("没有其他可用 Key 时只保留当前会话 Key 的候选", () => {
+        expect(buildTextModelAttempts(["m1", "m2"], [], 7)).toEqual([{ model: "m1" }, { model: "m2" }]);
+        expect(buildTextModelAttempts(["m1", "m2"], [{ id: 7, textModelCount: 5 }], 7)).toEqual([{ model: "m1" }, { model: "m2" }]);
+    });
+
+    it("候选为空时不产生任何尝试（包括其他 Key）", () => {
+        expect(buildTextModelAttempts([], [{ id: 3, textModelCount: 9 }], 7)).toEqual([]);
+        expect(buildTextModelAttempts(["   "], [{ id: 3, textModelCount: 9 }], 7)).toEqual([]);
+    });
+
+    it("不修改传入的 Key 列表（排序不外泄）", () => {
+        const keys = [{ id: 9, textModelCount: 1 }, { id: 2, textModelCount: 8 }];
+        buildTextModelAttempts(["m"], keys, 7);
+        expect(keys.map((key) => key.id)).toEqual([9, 2]);
+    });
+});
+
+describe("retryTextModelAttempts", () => {
+    it("按序列依次尝试并把 apiKeyId 传给调用方，首个成功即停止", async () => {
+        const seen: Array<number | undefined> = [];
+        const result = await retryTextModelAttempts(
+            [
+                { model: "m1" },
+                { apiKeyId: 3, model: "m1" },
+                { apiKeyId: 4, model: "m1" },
+            ],
+            async (target) => {
+                seen.push(target.apiKeyId);
+                if (target.apiKeyId === 3) return `ok:${target.apiKeyId}`;
+                throw new Error("无可用渠道：请求失败：404");
+            },
+        );
+        expect(result).toBe("ok:3");
+        expect(seen).toEqual([undefined, 3]);
+    });
+
+    it("不可切换错误立即抛出且不换 Key", async () => {
         const attempt = vi.fn(async () => {
             throw new Error("请求失败：400");
         });
-        await expect(retryTextModelsWithFallback(["a", "b"], attempt)).rejects.toThrow("请求失败：400");
+        await expect(retryTextModelAttempts([{ model: "m1" }, { apiKeyId: 3, model: "m1" }], attempt)).rejects.toThrow("请求失败：400");
         expect(attempt).toHaveBeenCalledTimes(1);
     });
 
-    it("用户取消立即抛出且不再尝试后续候选", async () => {
+    it("用户取消立即抛出且不换 Key", async () => {
         const attempt = vi.fn(async () => {
             throw new DOMException("Aborted", "AbortError");
         });
-        await expect(retryTextModelsWithFallback(["a", "b"], attempt)).rejects.toMatchObject({ name: "AbortError" });
+        await expect(retryTextModelAttempts([{ model: "m1" }, { apiKeyId: 3, model: "m1" }], attempt)).rejects.toMatchObject({ name: "AbortError" });
         expect(attempt).toHaveBeenCalledTimes(1);
     });
 
-    it("全部候选失败时抛出携带已尝试模型列表的错误", async () => {
-        const attempt = vi.fn(async (model: string) => {
-            throw new Error(`模型 ${model} 不可用：请求失败：404`);
+    it("全部失败时抛出 TextModelFallbackError，attemptedModels 记录已尝试的模型", async () => {
+        const attempt = vi.fn(async () => {
+            throw new Error("无可用渠道：请求失败：404");
         });
-        const error = await retryTextModelsWithFallback(["a", "b"], attempt).catch((reason: unknown) => reason);
+        const error = await retryTextModelAttempts([{ model: "m1" }, { apiKeyId: 3, model: "m1" }, { apiKeyId: 4, model: "m2" }], attempt).catch((reason: unknown) => reason);
         expect(error).toBeInstanceOf(TextModelFallbackError);
-        expect((error as TextModelFallbackError).attemptedModels).toEqual(["a", "b"]);
-        expect((error as Error).message).toContain("a、b");
-        expect((error as Error).message).toContain("请求失败：404");
+        expect((error as TextModelFallbackError).attemptedModels).toEqual(["m1", "m1", "m2"]);
+        expect(attempt).toHaveBeenCalledTimes(3);
     });
 
-    it("候选为空时抛出且不调用尝试函数", async () => {
+    it("序列为空时抛出且不调用尝试函数", async () => {
         const attempt = vi.fn(async () => "ok");
-        await expect(retryTextModelsWithFallback([], attempt)).rejects.toThrow("没有可用的文本模型");
+        await expect(retryTextModelAttempts([], attempt)).rejects.toThrow("没有可用的文本模型");
         expect(attempt).not.toHaveBeenCalled();
     });
 });

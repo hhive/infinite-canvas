@@ -56,8 +56,8 @@ import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import { createCanvasNode } from "@/lib/canvas/canvas-node-factory";
 import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canUngroupSelectedNodes, collectGroupMemberNodes, getGroupWrapRect } from "@/lib/canvas/canvas-node-geometry";
 import { getNodeDefinition, isBuiltinNodeType, isBuiltinNodeType as isBuiltinType, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
-import { resolveTextModelCandidates, retryTextModelsWithFallback } from "@/lib/canvas/text-model-fallback";
-import { ensureMediaModelsLoaded } from "@/stores/use-media-api-key-store";
+import { buildTextModelAttempts, resolveTextModelCandidates, retryTextModelAttempts, type TextModelAttempt } from "@/lib/canvas/text-model-fallback";
+import { ensureMediaAPIKeysLoaded, ensureMediaModelsLoaded, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
 import { registerBuiltinNodes } from "@/components/canvas/nodes/builtin-nodes";
 import { CanvasPluginManagerModal } from "@/components/canvas/canvas-plugin-manager-modal";
 import { CanvasRefreshShell } from "@/components/canvas/canvas-refresh-shell";
@@ -2519,16 +2519,19 @@ function InfiniteCanvasPage() {
                 setDialogNodeId(nodeId);
 
                 const controller = rootId === nodeId ? runController : startGenerationRequest(rootId, nodeId, nodeId, runController);
-                // 文本模式：节点已选模型失败时按候选顺序静默切换模型，不弹提示、不写节点状态。
-                const textCandidates = candidateTextModels(generationConfig.model);
+                // 文本模式：节点已选模型失败时先按候选顺序静默换模型；当前会话 Key 的候选全部因可切换错误
+                // 失败后，再按请求维度（X-Media-Api-Key-Id 请求头）换其他 Key，不弹提示、不改全局会话 Key。
+                // 先 await 加载 Key 列表，否则未加载的 store 会让 Key 维度整条失效。
+                const textAttempts = await prepareCanvasTextAttempts(generationConfig.model);
                 const textMessages = buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt });
                 const results = await Promise.all(
                     textIds.map(async (textId): Promise<CanvasNodeText | null> => {
                         let streamed = "";
+                        let usedModel = "";
                         try {
-                            const answer = await retryTextModelsWithFallback(textCandidates, (model) =>
-                                requestImageQuestion(
-                                    { ...generationConfig, model },
+                            const answer = await retryTextModelAttempts(textAttempts, async (target) => {
+                                const value = await requestImageQuestion(
+                                    { ...generationConfig, model: target.model },
                                     textMessages,
                                     (text) => {
                                         streamed = text;
@@ -2547,9 +2550,11 @@ function InfiniteCanvasPage() {
                                             ),
                                         );
                                     },
-                                    { signal: controller.signal },
-                                ),
-                            );
+                                    { signal: controller.signal, apiKeyId: target.apiKeyId },
+                                );
+                                usedModel = target.model;
+                                return value;
+                            });
                             const content = answer || streamed;
                             setNodes((prev) =>
                                 prev.map((node) =>
@@ -2565,6 +2570,9 @@ function InfiniteCanvasPage() {
                                         : node,
                                 ),
                             );
+                            // 静默回写实际使用的模型，让配置节点状态与实际一致；失败时不回写。
+                            const writeback = resolveTextModelWriteback(nodeId, generationConfig.model, usedModel);
+                            if (writeback) setNodes((prev) => prev.map((node) => (node.id === writeback.nodeId ? { ...node, metadata: { ...node.metadata, model: writeback.model } } : node)));
                             return { id: textId, status: NODE_STATUS_SUCCESS, content } satisfies CanvasNodeText;
                         } catch (error) {
                             if (isGenerationCanceled(error)) return null;
@@ -2678,14 +2686,22 @@ function InfiniteCanvasPage() {
                 if (node.type === CanvasNodeType.Text) {
                     if (!context) return;
                     let streamed = "";
+                    let usedModel = "";
                     const messages = buildNodeResponseMessages({ ...context, prompt });
-                    const answer = await retryTextModelsWithFallback(candidateTextModels(generationConfig.model), (model) =>
-                        requestImageQuestion({ ...generationConfig, model }, messages, (text) => {
+                    // 与文本生成一致：先换模型，再按请求维度换 Key，始终不动全局会话 Key。
+                    const textAttempts = await prepareCanvasTextAttempts(generationConfig.model);
+                    const answer = await retryTextModelAttempts(textAttempts, async (target) => {
+                        const value = await requestImageQuestion({ ...generationConfig, model: target.model }, messages, (text) => {
                             streamed = text;
                             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: text, status: NODE_STATUS_LOADING } } : item)));
-                        }, { signal: controller.signal }),
-                    );
+                        }, { signal: controller.signal, apiKeyId: target.apiKeyId });
+                        usedModel = target.model;
+                        return value;
+                    });
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer || streamed, prompt, status: NODE_STATUS_SUCCESS } } : item)));
+                    // 静默回写实际使用的模型到驱动本次生成的节点（配置节点），失败时不回写。
+                    const writeback = resolveTextModelWriteback(sourceNode.id, generationConfig.model, usedModel);
+                    if (writeback) setNodes((prev) => prev.map((item) => (item.id === writeback.nodeId ? { ...item, metadata: { ...item.metadata, model: writeback.model } } : item)));
                     return;
                 }
                 if (node.type === CanvasNodeType.Video) {
@@ -3699,10 +3715,50 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
     };
 }
 
-/** 文本模型候选：节点已选模型 → gpt-6-astra（仅当在当前 Key 的文本目录中）→ 目录首项 → 其余项。 */
-function candidateTextModels(selectedModel: string) {
+/**
+ * 文本模式的尝试序列：先集中试当前会话 Key 配模型候选，再按请求维度换其他 Key。
+ *
+ * 模型候选：节点已选模型 → gpt-6-astra（仅当在当前 Key 的文本目录中）→ 目录首项 → 其余项。
+ * Key 维度：只读 store 快照构造请求头，绝不调用 select/activate 切换全局会话 Key——
+ * 会话 Key 是全局的，用户在图片节点选过的 Key 会被文本请求继承，切换会把图片/视频一起切走。
+ * 文本目录里的 `textModelCount` 计数不可得时为 0，因此只按计数排序、不做计数前置过滤
+ * （见 mediaAPIKeyCapabilityCount 的哨兵说明）。
+ */
+export function buildCanvasTextAttempts(selectedModel: string): TextModelAttempt[] {
     const textModels = useConfigStore.getState().mediaModels?.text ?? [];
-    return resolveTextModelCandidates(selectedModel, textModels.map((item) => item.model));
+    const candidates = resolveTextModelCandidates(selectedModel, textModels.map((item) => item.model));
+    // 手填 API Key 时不换 Key：此时请求带的是用户自己的 Bearer，再附上 X-Media-Api-Key-Id
+    // 会被后端按该 Key 转发，等于覆盖用户的选择。
+    if (hasManualMediaAPIKey()) return buildTextModelAttempts(candidates);
+    const keyState = useMediaAPIKeyStore.getState();
+    return buildTextModelAttempts(candidates, keyState.keys, keyState.currentKeyId);
+}
+
+/**
+ * 文本重试前的准备：先确保 Key 列表已加载（只加载、不切换会话），再构造尝试序列。
+ * 必须在构造序列前 await，否则 store 未加载时 `keys` 为空、Key 维度整条静默失效——
+ * 一个只有文本节点、没碰过图片/视频的画布正是这种状态。
+ */
+export async function prepareCanvasTextAttempts(selectedModel: string): Promise<TextModelAttempt[]> {
+    // 手填 API Key 时不需要 Key 列表（buildCanvasTextAttempts 会早返回），跳过这次加载。
+    if (!hasManualMediaAPIKey()) await ensureMediaAPIKeysLoaded();
+    return buildCanvasTextAttempts(selectedModel);
+}
+
+/** 是否手填了 API Key：判断口径与 MediaAPIKeyPicker、ensureMediaModelsLoaded 一致。 */
+function hasManualMediaAPIKey() {
+    const config = useConfigStore.getState().config;
+    return Boolean(config.apiKey.trim() || config.channels.some((channel) => channel.apiKey.trim()));
+}
+
+/**
+ * 文本生成成功后要静默回写的模型：失败（usedModel 为空）或与节点记录一致时返回 null。
+ * 只用于让节点状态与实际一致，不产生任何提示。
+ */
+export function resolveTextModelWriteback(nodeId: string, recordedModel: string | undefined, usedModel: string | undefined): { nodeId: string; model: string } | null {
+    const model = (usedModel || "").trim();
+    if (!nodeId || !model || model === (recordedModel || "").trim()) return null;
+    return { nodeId, model };
 }
 
 function isGenerationCanceled(error: unknown) {

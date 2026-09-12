@@ -80,6 +80,47 @@ describe("requestImageQuestion same-origin transport", () => {
         expect(onDelta.mock.calls.map(([text]) => text)).toEqual(["反推", "反推结果"]);
     });
 
+    it("adds the request-scoped media api key header for a same-origin /responses call", async () => {
+        const fetchMock = stubFetch();
+
+        await requestImageQuestion(textConfig(), [{ role: "user", content: "描述这张图" }], () => {}, { apiKeyId: 7 });
+
+        const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
+        expect(url).toBe(`${sameOrigin}/v1/responses`);
+        expect(init.headers["X-Media-Api-Key-Id"]).toBe("7");
+    });
+
+    it("keeps the session key when no request-scoped api key id is given", async () => {
+        const fetchMock = stubFetch();
+
+        await requestImageQuestion(textConfig(), [{ role: "user", content: "描述这张图" }], () => {}, { apiKeyId: undefined });
+
+        const [, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
+        expect(init.headers).not.toHaveProperty("X-Media-Api-Key-Id");
+    });
+
+    it("never sends the media api key header to a cross-origin upstream", async () => {
+        const fetchMock = stubFetch();
+
+        await requestImageQuestion(textConfig({ baseUrl: "https://api.example.com", apiKey: "sk-cross" }), [{ role: "user", content: "描述这张图" }], () => {}, { apiKeyId: 7 });
+
+        const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
+        expect(url).toBe("https://api.example.com/v1/responses");
+        expect(init.headers).not.toHaveProperty("X-Media-Api-Key-Id");
+    });
+
+    it("ignores an invalid request-scoped api key id", async () => {
+        const fetchMock = stubFetch();
+
+        await requestImageQuestion(textConfig(), [{ role: "user", content: "描述这张图" }], () => {}, { apiKeyId: 0 });
+        await requestImageQuestion(textConfig(), [{ role: "user", content: "描述这张图" }], () => {}, { apiKeyId: 2.5 });
+        await requestImageQuestion(textConfig(), [{ role: "user", content: "描述这张图" }], () => {}, { apiKeyId: -3 });
+
+        for (const [, init] of fetchMock.mock.calls as unknown as Array<[string, { headers: Record<string, string> }]>) {
+            expect(init.headers).not.toHaveProperty("X-Media-Api-Key-Id");
+        }
+    });
+
     it("surfaces the upstream error message for a non-2xx same-origin response", async () => {
         vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 502, text: async () => JSON.stringify({ error: { message: "上游不可用" } }) })));
 

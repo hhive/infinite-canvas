@@ -43,6 +43,9 @@ export async function switchMediaAPIKey(apiKeyId: number, signal?: AbortSignal) 
  * Key 选择器与切换逻辑共用的可用性计数。
  * 文本恒返回大于 0 的哨兵：文本模型权限由 Sub2API 在调用时校验，Media 侧不做前置过滤；
  * `text_model_count` 计数不可得时会返回 0，若仍按计数过滤会把可选 Key 全部禁用。
+ * 文本也不能做计数前置过滤：Media 会话 Key 是全局的，按文本计数触发切换（activate）会让
+ * 文本节点挂载时抢走图片/视频正在使用的会话 Key；文本的 Key 维度重试改走请求头
+ * （见 lib/canvas/text-model-fallback 的 buildTextModelAttempts），不切换全局会话。
  */
 export function mediaAPIKeyCapabilityCount(key: Pick<MediaAPIKey, "imageModelCount" | "videoModelCount" | "textModelCount">, capability: MediaCapability): number {
     if (capability === "text") return 1;

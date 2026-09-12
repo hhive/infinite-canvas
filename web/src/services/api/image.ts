@@ -88,7 +88,11 @@ type GeminiPayload = {
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
 export type ImageTaskRequestOptions = { signal?: AbortSignal; onTask?: (task: ImageTask) => void | Promise<void> };
-type RequestOptions = { signal?: AbortSignal };
+/**
+ * `apiKeyId` 为请求维度的 API Key 指定：仅同源（Media 代理）的 `/responses` 请求会带上
+ * `X-Media-Api-Key-Id` 头，由后端用该 Key 转发且不改动全局会话；直连上游时忽略。
+ */
+type RequestOptions = { signal?: AbortSignal; apiKeyId?: number };
 
 export type ImageTaskStatus = "queued" | "running" | "completed" | "failed" | "canceled" | "expired";
 export type ImageTask = {
@@ -399,14 +403,22 @@ function aiHeaders(config: AiConfig, contentType?: string) {
     };
 }
 
+/** 请求维度的 Media API Key 指定头：值为正整数 API Key ID，只随同源 `/responses` 请求发送。 */
+const MEDIA_API_KEY_ID_HEADER = "X-Media-Api-Key-Id";
+
 /**
  * `/responses` 的请求头。同源（Media 会话代理）走 Cookie 鉴权，用 sameOriginHeaders：
  * apiKey 为空时不发送 Authorization，避免 aiHeaders 拼出只有空值的 `Bearer `。
  * selectedModel 传原始选中的模型值（可能带 `channel::` 前缀），判断口径与图片/视频一致。
+ *
+ * `apiKeyId` 只在同源分支生效：由 Media 代理按该 Key 转发本次请求，不改动全局会话 Key；
+ * 直连上游时没有这个约定的头，带上反而可能被上游拒绝。
  */
-function responseRequestHeaders(config: AiConfig, selectedModel: string) {
-    const authorization = isSameOriginMediaConfig(config, selectedModel) ? sameOriginHeaders(config.apiKey) : aiHeaders(config, "application/json");
-    return { ...authorization, "Content-Type": "application/json", Accept: "text/event-stream" };
+function responseRequestHeaders(config: AiConfig, selectedModel: string, apiKeyId?: number) {
+    if (!isSameOriginMediaConfig(config, selectedModel)) return { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" };
+    const headers: Record<string, string> = { ...sameOriginHeaders(config.apiKey), "Content-Type": "application/json", Accept: "text/event-stream" };
+    if (Number.isSafeInteger(apiKeyId) && (apiKeyId as number) > 0) headers[MEDIA_API_KEY_ID_HEADER] = String(apiKeyId);
+    return headers;
 }
 
 function geminiBaseUrl(config: Pick<AiConfig, "baseUrl">) {
@@ -560,7 +572,7 @@ function consumeResponseStreamText(state: ResponseStreamState, text: string, onD
 async function requestStreamingResponse(config: AiConfig, selectedModel: string, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
     const response = await fetch(aiApiUrl(config, "/responses"), {
         method: "POST",
-        headers: responseRequestHeaders(config, selectedModel),
+        headers: responseRequestHeaders(config, selectedModel, options?.apiKeyId),
         body: JSON.stringify({ ...body, stream: true }),
         signal: options?.signal,
     });

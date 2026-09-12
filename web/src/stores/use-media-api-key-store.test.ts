@@ -13,7 +13,7 @@ vi.mock(import("@/services/api/media-api-keys"), async (importOriginal) => {
 vi.mock("@/services/api/media-models", () => ({ fetchMediaModels }));
 
 import { useConfigStore } from "@/stores/use-config-store";
-import { currentMediaModelRequestEpoch, ensureMediaModelsLoaded, isMediaModelRequestEpochCurrent, resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
+import { currentMediaModelRequestEpoch, ensureMediaAPIKeysLoaded, ensureMediaModelsLoaded, isMediaModelRequestEpochCurrent, resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
 
 const emptyMediaModels = { image: [], video: [], text: [] };
 
@@ -136,6 +136,34 @@ describe("Media API Key session selection", () => {
         expect(useConfigStore.getState().mediaModels.image[0]?.model).toBe("image-20");
         expect(useConfigStore.getState().mediaModels.video[0]?.model).toBe("video-20");
         expect(switchMediaAPIKey.mock.calls.every(([, signal]) => signal === undefined)).toBe(true);
+    });
+});
+
+describe("ensureMediaAPIKeysLoaded", () => {
+    it("只加载 Key 列表，不发送切换请求，currentKeyId 只对齐服务端当前值", async () => {
+        await expect(ensureMediaAPIKeysLoaded()).resolves.toBeUndefined();
+
+        expect(fetchMediaAPIKeys).toHaveBeenCalledTimes(1);
+        expect(switchMediaAPIKey).not.toHaveBeenCalled();
+        expect(useMediaAPIKeyStore.getState()).toMatchObject({ status: "ready", currentKeyId: 10 });
+    });
+
+    it("已加载后重复调用不重复请求，也不改动当前 Key", async () => {
+        await ensureMediaAPIKeysLoaded();
+        await ensureMediaAPIKeysLoaded();
+
+        expect(fetchMediaAPIKeys).toHaveBeenCalledTimes(1);
+        expect(useMediaAPIKeyStore.getState().currentKeyId).toBe(10);
+        expect(switchMediaAPIKey).not.toHaveBeenCalled();
+    });
+
+    it("加载失败时静默返回，不抛错也不切换 Key", async () => {
+        fetchMediaAPIKeys.mockRejectedValueOnce(new Error("Key 列表不可用"));
+
+        await expect(ensureMediaAPIKeysLoaded()).resolves.toBeUndefined();
+
+        expect(useMediaAPIKeyStore.getState()).toMatchObject({ status: "unavailable", currentKeyId: null, error: "Key 列表不可用" });
+        expect(switchMediaAPIKey).not.toHaveBeenCalled();
     });
 });
 

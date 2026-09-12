@@ -2,7 +2,18 @@ import { act, createElement, type ComponentProps, type ReactElement, type ReactN
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildPluginBuiltinPrompt, CanvasTopBar, hasActiveCanvasMediaTask } from "@/pages/canvas/project";
+import { buildCanvasTextAttempts, buildPluginBuiltinPrompt, CanvasTopBar, hasActiveCanvasMediaTask, prepareCanvasTextAttempts, resolveTextModelWriteback } from "@/pages/canvas/project";
+import { retryTextModelAttempts, TextModelFallbackError } from "@/lib/canvas/text-model-fallback";
+import type { MediaAPIKey } from "@/services/api/media-api-keys";
+import { useConfigStore } from "@/stores/use-config-store";
+import { resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
+
+const { fetchMediaAPIKeys, switchMediaAPIKey } = vi.hoisted(() => ({ fetchMediaAPIKeys: vi.fn(), switchMediaAPIKey: vi.fn() }));
+
+vi.mock(import("@/services/api/media-api-keys"), async (importOriginal) => {
+    const actual = await importOriginal();
+    return { ...actual, fetchMediaAPIKeys, switchMediaAPIKey };
+});
 import { resolveCanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
@@ -145,5 +156,131 @@ describe("plugin built-in generation panel", () => {
 
     it("prepends the plugin prompt contract before generation", () => {
         expect(buildPluginBuiltinPrompt("PANORAMA:", "night harbor")).toBe("PANORAMA:night harbor");
+    });
+});
+
+describe("canvas text fallback across request-scoped api keys", () => {
+    const originalTextModels = useConfigStore.getState().mediaModels.text;
+    const originalConfig = useConfigStore.getState().config;
+    const originalKeyState = useMediaAPIKeyStore.getState();
+
+    function mediaKey(id: number, textModelCount: number, current = false): MediaAPIKey {
+        return { id, name: `Key ${id}`, maskedKey: `sk-****${id}`, groupName: `group-${id}`, imageModelCount: 3, videoModelCount: 2, textModelCount, current };
+    }
+
+    function setTextModels(models: string[]) {
+        useConfigStore.setState((state) => ({
+            mediaModels: { ...state.mediaModels, text: models.map((model) => ({ id: model, mediaType: "text" as const, model, displayName: model, providerName: "", apiMode: "", priceQuota: 0 })) },
+        }));
+    }
+
+    function prepareTextGeneration(models: string[], keys: MediaAPIKey[], currentKeyId: number | null) {
+        setTextModels(models);
+        useMediaAPIKeyStore.setState({ keys, currentKeyId, status: "ready", error: "" });
+    }
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        useConfigStore.setState({ config: originalConfig });
+        resetMediaAPIKeyStore();
+    });
+
+    afterEach(() => {
+        useConfigStore.setState((state) => ({ config: originalConfig, mediaModels: { ...state.mediaModels, text: originalTextModels } }));
+        useMediaAPIKeyStore.setState({ keys: originalKeyState.keys, currentKeyId: originalKeyState.currentKeyId, status: originalKeyState.status, error: originalKeyState.error });
+    });
+
+    it("当前会话 Key 先试全部模型候选，再按文本模型数降序换其他 Key 并只用首项模型", () => {
+        prepareTextGeneration(["catalog-a", "gpt-6-astra"], [mediaKey(9, 2), mediaKey(3, 12), mediaKey(4, 0)], 7);
+
+        expect(buildCanvasTextAttempts("node-model")).toEqual([
+            { model: "node-model" },
+            { model: "gpt-6-astra" },
+            { model: "catalog-a" },
+            { apiKeyId: 3, model: "node-model" },
+            { apiKeyId: 9, model: "node-model" },
+        ]);
+    });
+
+    it("没有其他可用 Key 时只返回当前会话 Key 的候选", () => {
+        prepareTextGeneration(["catalog-a"], [mediaKey(7, 5)], 7);
+
+        expect(buildCanvasTextAttempts("node-model")).toEqual([{ model: "node-model" }, { model: "catalog-a" }]);
+    });
+
+    it("store 未加载时先拉取 Key 列表再构造序列，且只加载不切换", async () => {
+        setTextModels(["catalog-a", "gpt-6-astra"]);
+        fetchMediaAPIKeys.mockResolvedValue([mediaKey(7, 2, true), mediaKey(9, 9)]);
+        switchMediaAPIKey.mockResolvedValue(undefined);
+
+        const attempts = await prepareCanvasTextAttempts("node-model");
+
+        expect(fetchMediaAPIKeys).toHaveBeenCalledTimes(1);
+        expect(switchMediaAPIKey).not.toHaveBeenCalled();
+        expect(useMediaAPIKeyStore.getState()).toMatchObject({ status: "ready", currentKeyId: 7 });
+        expect(attempts).toEqual([
+            { model: "node-model" },
+            { model: "gpt-6-astra" },
+            { model: "catalog-a" },
+            { apiKeyId: 9, model: "node-model" },
+        ]);
+    });
+
+    it("Key 列表加载失败时静默回退到当前会话 Key，不影响生成", async () => {
+        setTextModels(["catalog-a", "gpt-6-astra"]);
+        fetchMediaAPIKeys.mockRejectedValue(new Error("Key 列表不可用"));
+
+        await expect(prepareCanvasTextAttempts("node-model")).resolves.toEqual([
+            { model: "node-model" },
+            { model: "gpt-6-astra" },
+            { model: "catalog-a" },
+        ]);
+        expect(switchMediaAPIKey).not.toHaveBeenCalled();
+    });
+
+    it("手填 API Key 时不换 Key，也不拉取 Key 列表，避免请求头覆盖用户自己的 Bearer", async () => {
+        prepareTextGeneration(["catalog-a"], [mediaKey(9, 2), mediaKey(3, 12)], 7);
+        const config = useConfigStore.getState().config;
+        useConfigStore.setState({ config: { ...config, apiKey: "sk-manual" } });
+
+        expect(buildCanvasTextAttempts("node-model")).toEqual([{ model: "node-model" }, { model: "catalog-a" }]);
+        await expect(prepareCanvasTextAttempts("node-model")).resolves.toEqual([{ model: "node-model" }, { model: "catalog-a" }]);
+        expect(fetchMediaAPIKeys).not.toHaveBeenCalled();
+    });
+
+    it("重试过程中不改动全局会话 Key：不调用 select/activate，currentKeyId 保持原值", async () => {
+        prepareTextGeneration(["catalog-a", "gpt-6-astra"], [mediaKey(9, 2), mediaKey(3, 12)], 7);
+        const keyStore = useMediaAPIKeyStore.getState();
+        const selectSpy = vi.spyOn(keyStore, "select");
+        const activateSpy = vi.spyOn(keyStore, "activate");
+        const seen: Array<number | undefined> = [];
+
+        const error = await retryTextModelAttempts(buildCanvasTextAttempts("node-model"), async (target) => {
+            seen.push(target.apiKeyId);
+            throw new Error("当前分组下对于模型无可用渠道：请求失败：404");
+        }).catch((reason: unknown) => reason);
+
+        expect(seen).toEqual([undefined, undefined, undefined, 3, 9]);
+        expect(error).toBeInstanceOf(TextModelFallbackError);
+        expect(selectSpy).not.toHaveBeenCalled();
+        expect(activateSpy).not.toHaveBeenCalled();
+        expect(useMediaAPIKeyStore.getState().currentKeyId).toBe(7);
+    });
+});
+
+describe("resolveTextModelWriteback", () => {
+    it("实际使用的模型与配置节点记录不同时回写该节点", () => {
+        expect(resolveTextModelWriteback("config-1", "node-model", "gpt-6-astra")).toEqual({ nodeId: "config-1", model: "gpt-6-astra" });
+    });
+
+    it("实际使用的模型与记录一致时不回写", () => {
+        expect(resolveTextModelWriteback("config-1", "gpt-6-astra", "gpt-6-astra")).toBeNull();
+        expect(resolveTextModelWriteback("config-1", " gpt-6-astra ", "gpt-6-astra")).toBeNull();
+    });
+
+    it("失败（没有实际使用的模型）时不回写", () => {
+        expect(resolveTextModelWriteback("config-1", "node-model", undefined)).toBeNull();
+        expect(resolveTextModelWriteback("config-1", "node-model", "")).toBeNull();
+        expect(resolveTextModelWriteback("", "node-model", "gpt-6-astra")).toBeNull();
     });
 });

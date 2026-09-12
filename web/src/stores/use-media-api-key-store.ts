@@ -73,6 +73,19 @@ export const useMediaAPIKeyStore = create<MediaAPIKeyStore>()((set, get) => ({
     select: async (apiKeyId, capability) => switchKey(apiKeyId, capability, true, set, get),
 }));
 
+/**
+ * 只加载 Key 列表，不切换会话：复用 {@link ensureLoaded}，不调用 select/activate，也不发送切换请求。
+ * 文本重试需要在构造尝试序列前拿到 Key 列表，否则 store 未加载时 Key 维度整条失效。
+ * 永不抛错：加载失败只影响 Key 维度的重试，调用方按当前会话 Key 照常生成。
+ */
+export async function ensureMediaAPIKeysLoaded(): Promise<void> {
+    try {
+        await ensureLoaded(useMediaAPIKeyStore.setState, useMediaAPIKeyStore.getState);
+    } catch {
+        /* 失败时 store 已是 unavailable，此处静默：文本生成不能因此失败。 */
+    }
+}
+
 async function ensureLoaded(set: StoreSet, get: StoreGet) {
     if (get().status !== "idle") return loadPromise;
     set({ status: "loading", error: "" });
