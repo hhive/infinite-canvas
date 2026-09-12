@@ -29,7 +29,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const listboxId = `${pickerId}-listbox`;
     const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
     const current = value || "";
-    const mediaModels = useConfigStore((state) => (capability === "image" || capability === "video" ? state.mediaModels[capability] : EMPTY_MEDIA_MODELS));
+    const mediaModels = useConfigStore((state) => (capability === "image" || capability === "video" || capability === "text" ? state.mediaModels[capability] : EMPTY_MEDIA_MODELS));
     const filteredOptions = useMemo(() => {
         const keyword = query.trim().toLocaleLowerCase();
         return keyword ? options.filter((model) => modelSearchText(config, mediaModels, model).includes(keyword)) : options;

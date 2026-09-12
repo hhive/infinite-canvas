@@ -399,6 +399,16 @@ function aiHeaders(config: AiConfig, contentType?: string) {
     };
 }
 
+/**
+ * `/responses` 的请求头。同源（Media 会话代理）走 Cookie 鉴权，用 sameOriginHeaders：
+ * apiKey 为空时不发送 Authorization，避免 aiHeaders 拼出只有空值的 `Bearer `。
+ * selectedModel 传原始选中的模型值（可能带 `channel::` 前缀），判断口径与图片/视频一致。
+ */
+function responseRequestHeaders(config: AiConfig, selectedModel: string) {
+    const authorization = isSameOriginMediaConfig(config, selectedModel) ? sameOriginHeaders(config.apiKey) : aiHeaders(config, "application/json");
+    return { ...authorization, "Content-Type": "application/json", Accept: "text/event-stream" };
+}
+
 function geminiBaseUrl(config: Pick<AiConfig, "baseUrl">) {
     const normalizedBaseUrl = config.baseUrl.trim().replace(/\/+$/, "");
     const lowerBaseUrl = normalizedBaseUrl.toLowerCase();
@@ -547,10 +557,10 @@ function consumeResponseStreamText(state: ResponseStreamState, text: string, onD
     }
 }
 
-async function requestStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
+async function requestStreamingResponse(config: AiConfig, selectedModel: string, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
     const response = await fetch(aiApiUrl(config, "/responses"), {
         method: "POST",
-        headers: { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" },
+        headers: responseRequestHeaders(config, selectedModel),
         body: JSON.stringify({ ...body, stream: true }),
         signal: options?.signal,
     });
@@ -979,6 +989,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             (
                 await requestStreamingResponse(
                     requestConfig,
+                    selectedModel,
                     {
                         model: requestConfig.model,
                         input: toResponseInput(withSystemMessage(requestConfig, messages)),

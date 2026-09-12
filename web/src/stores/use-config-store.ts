@@ -249,10 +249,10 @@ export const useConfigStore = create<ConfigStore>()(
             configTab: "channels",
             shouldPromptContinue: false,
             cookieSessionReady: false,
-            mediaModels: { image: [], video: [] },
-            mediaModelStatus: { image: "idle", video: "idle" },
-            mediaModelErrors: { image: "", video: "" },
-            mediaModelsRefreshedAt: { image: "", video: "" },
+            mediaModels: { image: [], video: [], text: [] },
+            mediaModelStatus: { image: "idle", video: "idle", text: "idle" },
+            mediaModelErrors: { image: "", video: "", text: "" },
+            mediaModelsRefreshedAt: { image: "", video: "", text: "" },
             updateConfig: (key, value) =>
                 set((state) => ({
                     config: {
@@ -292,8 +292,8 @@ export const useConfigStore = create<ConfigStore>()(
                 const normalizedMediaModels = uniqueMediaModels(mediaModels);
                 const firstChannel = state.config.channels[0] || createModelChannel({ id: "default", name: i18n.t("config.channels.defaultName") });
                 const options = normalizedMediaModels.map((item) => encodeChannelModel(firstChannel.id, item.model));
-                const modelKey = capability === "image" ? "imageModel" : "videoModel";
-                const modelsKey = capability === "image" ? "imageModels" : "videoModels";
+                const modelKey = capability === "image" ? "imageModel" : capability === "video" ? "videoModel" : "textModel";
+                const modelsKey = capability === "image" ? "imageModels" : capability === "video" ? "videoModels" : "textModels";
                 const previousNames = new Set(state.config[modelsKey].map(modelOptionName));
                 const channels = [{
                     ...firstChannel,

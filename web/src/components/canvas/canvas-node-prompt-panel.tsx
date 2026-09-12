@@ -93,7 +93,7 @@ export function CanvasNodePromptPanel({ node, nodes, isRunning, taskActive = isR
                 placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
             />
 
-            {mode === "image" || mode === "video" ? <div className="mt-2"><MediaAPIKeyPicker capability={mode} taskActive={taskActive} active={active} compact /></div> : null}
+            {mode === "image" || mode === "video" || mode === "text" ? <div className="mt-2"><MediaAPIKeyPicker capability={mode} taskActive={taskActive} active={active} compact /></div> : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">

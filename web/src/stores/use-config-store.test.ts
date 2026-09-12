@@ -10,10 +10,10 @@ beforeEach(() => {
             apiKey: "sk-top-level-old",
             channels: defaultConfig.channels.map((channel) => ({ ...channel, apiKey: "sk-channel-old" })),
         },
-        mediaModels: { image: [], video: [] },
-        mediaModelStatus: { image: "idle", video: "idle" },
-        mediaModelErrors: { image: "", video: "" },
-        mediaModelsRefreshedAt: { image: "", video: "" },
+        mediaModels: { image: [], video: [], text: [] },
+        mediaModelStatus: { image: "idle", video: "idle", text: "idle" },
+        mediaModelErrors: { image: "", video: "", text: "" },
+        mediaModelsRefreshedAt: { image: "", video: "", text: "" },
         cookieSessionReady: false,
     });
 });
@@ -139,5 +139,31 @@ describe("applyMediaModels", () => {
         expect(state.mediaModels.image).toEqual([]);
         expect(state.config.imageModels).toEqual([]);
         expect(state.config.imageModel).toBe("");
+    });
+
+    it("keeps the text catalog in its own slots without touching image or video", () => {
+        const textModels: MediaModel[] = [
+            { ...imageModel(41, "gpt-6-astra"), id: "gpt-6-astra", mediaType: "text" },
+            { ...imageModel(42, "gpt-5.5"), id: "gpt-5.5", mediaType: "text" },
+        ];
+
+        useConfigStore.getState().applyMediaModels("text", textModels);
+
+        const state = useConfigStore.getState();
+        expect(state.mediaModels.text).toEqual(textModels);
+        expect(state.config.textModels).toEqual(["default::gpt-6-astra", "default::gpt-5.5"]);
+        // 已选文本模型仍在目录中时保持用户选择不变
+        expect(state.config.textModel).toBe("default::gpt-5.5");
+        expect(state.mediaModelStatus.text).toBe("ready");
+        expect(state.mediaModels.image).toEqual([]);
+        expect(state.config.imageModels).toEqual(defaultConfig.imageModels);
+    });
+
+    it("falls back to the first text model when the selected one left the catalog", () => {
+        useConfigStore.setState((state) => ({ config: { ...state.config, textModel: "default::removed-text-model" } }));
+
+        useConfigStore.getState().applyMediaModels("text", [{ ...imageModel(43, "gpt-6-astra"), id: "gpt-6-astra", mediaType: "text" }]);
+
+        expect(useConfigStore.getState().config.textModel).toBe("default::gpt-6-astra");
     });
 });

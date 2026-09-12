@@ -56,6 +56,8 @@ import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import { createCanvasNode } from "@/lib/canvas/canvas-node-factory";
 import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canUngroupSelectedNodes, collectGroupMemberNodes, getGroupWrapRect } from "@/lib/canvas/canvas-node-geometry";
 import { getNodeDefinition, isBuiltinNodeType, isBuiltinNodeType as isBuiltinType, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
+import { resolveTextModelCandidates, retryTextModelsWithFallback } from "@/lib/canvas/text-model-fallback";
+import { ensureMediaModelsLoaded } from "@/stores/use-media-api-key-store";
 import { registerBuiltinNodes } from "@/components/canvas/nodes/builtin-nodes";
 import { CanvasPluginManagerModal } from "@/components/canvas/canvas-plugin-manager-modal";
 import { CanvasRefreshShell } from "@/components/canvas/canvas-refresh-shell";
@@ -1805,11 +1807,16 @@ function InfiniteCanvasPage() {
     );
 
     const createImageReversePromptNodes = useCallback(
-        (node: CanvasNodeData) => {
+        async (node: CanvasNodeData) => {
             if (node.type !== CanvasNodeType.Image || !node.metadata?.content) {
                 message.warning("图片节点为空，无法反推提示词");
                 return;
             }
+
+            // 文本模型目录属于当前 Key（同源）；目录还没加载时先补一次，失败会静默回退到节点已选模型。
+            const textModels = await ensureMediaModelsLoaded("text");
+            // 三级顺序：新建的反推节点还没有用户选择 → gpt-6-astra（仅当在当前 Key 目录中）→ 目录首项。
+            const reverseModel = resolveTextModelCandidates("", textModels.map((item) => item.model))[0] || effectiveConfig.textModel || effectiveConfig.model || defaultConfig.textModel;
 
             const gap = 96;
             const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
@@ -1829,7 +1836,7 @@ function InfiniteCanvasPage() {
                     { x: textNode.position.x + textNode.width + gap + configSpec.width / 2, y: centerY },
                     {
                         generationMode: "text",
-                        model: effectiveConfig.textModel || effectiveConfig.model || defaultConfig.textModel,
+                        model: reverseModel,
                         count: 1,
                         composerContent: `参考图片：@[node:${node.id}]\n任务说明：@[node:${textNode.id}]`,
                     },
@@ -2512,31 +2519,36 @@ function InfiniteCanvasPage() {
                 setDialogNodeId(nodeId);
 
                 const controller = rootId === nodeId ? runController : startGenerationRequest(rootId, nodeId, nodeId, runController);
+                // 文本模式：节点已选模型失败时按候选顺序静默切换模型，不弹提示、不写节点状态。
+                const textCandidates = candidateTextModels(generationConfig.model);
+                const textMessages = buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt });
                 const results = await Promise.all(
                     textIds.map(async (textId): Promise<CanvasNodeText | null> => {
                         let streamed = "";
                         try {
-                            const answer = await requestImageQuestion(
-                                generationConfig,
-                                buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt }),
-                                (text) => {
-                                    streamed = text;
-                                    setNodes((prev) =>
-                                        prev.map((node) =>
-                                            node.id === rootId
-                                                ? {
-                                                      ...node,
-                                                      metadata: {
-                                                          ...node.metadata,
-                                                          ...(node.metadata?.primaryTextId === textId ? { content: text } : {}),
-                                                          texts: node.metadata?.texts?.map((item) => (item.id === textId ? { ...item, content: text } : item)),
-                                                      },
-                                                  }
-                                                : node,
-                                        ),
-                                    );
-                                },
-                                { signal: controller.signal },
+                            const answer = await retryTextModelsWithFallback(textCandidates, (model) =>
+                                requestImageQuestion(
+                                    { ...generationConfig, model },
+                                    textMessages,
+                                    (text) => {
+                                        streamed = text;
+                                        setNodes((prev) =>
+                                            prev.map((node) =>
+                                                node.id === rootId
+                                                    ? {
+                                                          ...node,
+                                                          metadata: {
+                                                              ...node.metadata,
+                                                              ...(node.metadata?.primaryTextId === textId ? { content: text } : {}),
+                                                              texts: node.metadata?.texts?.map((item) => (item.id === textId ? { ...item, content: text } : item)),
+                                                          },
+                                                      }
+                                                    : node,
+                                            ),
+                                        );
+                                    },
+                                    { signal: controller.signal },
+                                ),
                             );
                             const content = answer || streamed;
                             setNodes((prev) =>
@@ -2666,10 +2678,13 @@ function InfiniteCanvasPage() {
                 if (node.type === CanvasNodeType.Text) {
                     if (!context) return;
                     let streamed = "";
-                    const answer = await requestImageQuestion(generationConfig, buildNodeResponseMessages({ ...context, prompt }), (text) => {
-                        streamed = text;
-                        setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: text, status: NODE_STATUS_LOADING } } : item)));
-                    }, { signal: controller.signal });
+                    const messages = buildNodeResponseMessages({ ...context, prompt });
+                    const answer = await retryTextModelsWithFallback(candidateTextModels(generationConfig.model), (model) =>
+                        requestImageQuestion({ ...generationConfig, model }, messages, (text) => {
+                            streamed = text;
+                            setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: text, status: NODE_STATUS_LOADING } } : item)));
+                        }, { signal: controller.signal }),
+                    );
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer || streamed, prompt, status: NODE_STATUS_SUCCESS } } : item)));
                     return;
                 }
@@ -3682,6 +3697,12 @@ function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefine
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
         count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
     };
+}
+
+/** 文本模型候选：节点已选模型 → gpt-6-astra（仅当在当前 Key 的文本目录中）→ 目录首项 → 其余项。 */
+function candidateTextModels(selectedModel: string) {
+    const textModels = useConfigStore.getState().mediaModels?.text ?? [];
+    return resolveTextModelCandidates(selectedModel, textModels.map((item) => item.model));
 }
 
 function isGenerationCanceled(error: unknown) {

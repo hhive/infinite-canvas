@@ -101,7 +101,7 @@ export function CanvasConfigNodePanel({ node, isRunning, taskActive = isRunning,
                 </button>
             </div>
 
-            {mode === "image" || mode === "video" ? <div className="mb-2"><MediaAPIKeyPicker capability={mode} taskActive={taskActive} active={active} compact /></div> : null}
+            {mode === "image" || mode === "video" || mode === "text" ? <div className="mb-2"><MediaAPIKeyPicker capability={mode} taskActive={taskActive} active={active} compact /></div> : null}
 
             <div className="mb-2 grid min-w-0 cursor-default grid-cols-[minmax(0,1fr)_148px] items-center gap-2" onMouseDown={(event) => event.stopPropagation()}>
                 <ModelPicker className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} onMissingConfig={() => openConfigDialog(true)} fullWidth />

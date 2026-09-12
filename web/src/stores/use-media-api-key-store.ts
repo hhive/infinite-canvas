@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
-import { fetchMediaAPIKeys, switchMediaAPIKey, type MediaAPIKey } from "@/services/api/media-api-keys";
-import { fetchMediaModels, type MediaCapability } from "@/services/api/media-models";
+import { fetchMediaAPIKeys, mediaAPIKeyCapabilityCount, switchMediaAPIKey, type MediaAPIKey } from "@/services/api/media-api-keys";
+import { fetchMediaModels, type MediaCapability, type MediaModel } from "@/services/api/media-models";
 import { useConfigStore } from "@/stores/use-config-store";
 
 type MediaAPIKeyStore = {
@@ -36,6 +36,28 @@ export function isMediaModelRequestEpochCurrent(epoch: number) {
     return epoch === mediaModelRequestEpoch;
 }
 
+/**
+ * 按需加载某个能力的模型目录：已有目录时直接复用，否则拉取一次并写入配置。
+ * 失败时静默返回空数组（不弹提示），调用方自行回退到节点已选模型。
+ */
+export async function ensureMediaModelsLoaded(capability: MediaCapability): Promise<MediaModel[]> {
+    const config = useConfigStore.getState().config;
+    const existing = useConfigStore.getState().mediaModels?.[capability] ?? [];
+    if (existing.length) return existing;
+    // 手填 API Key 时不请求 Media 目录：与 MediaAPIKeyPicker 的显示条件一致，
+    // 避免把同源渠道写进用户自己的渠道配置。
+    if (config.apiKey.trim() || config.channels.some((channel) => channel.apiKey.trim())) return [];
+    const epoch = mediaModelRequestEpoch;
+    try {
+        const models = await fetchMediaModels(capability, "");
+        if (!isMediaModelRequestEpochCurrent(epoch)) return useConfigStore.getState().mediaModels?.[capability] ?? [];
+        useConfigStore.getState().applyMediaModels(capability, models);
+        return models;
+    } catch {
+        return [];
+    }
+}
+
 export const useMediaAPIKeyStore = create<MediaAPIKeyStore>()((set, get) => ({
     ...initialState,
     activate: async (capability, taskActive, active = true) => {
@@ -43,9 +65,9 @@ export const useMediaAPIKeyStore = create<MediaAPIKeyStore>()((set, get) => ({
         await ensureLoaded(set, get);
         const state = get();
         if (!state.keys.length || state.status === "unavailable") return;
-        const preferred = state.keys.find((key) => key.id === state.preferences[capability] && modelCount(key, capability) > 0);
+        const preferred = state.keys.find((key) => key.id === state.preferences[capability] && mediaAPIKeyCapabilityCount(key, capability) > 0);
         const current = state.keys.find((key) => key.id === state.currentKeyId);
-        const candidate = preferred || (current && modelCount(current, capability) > 0 ? current : state.keys.find((key) => modelCount(key, capability) > 0));
+        const candidate = preferred || (current && mediaAPIKeyCapabilityCount(current, capability) > 0 ? current : state.keys.find((key) => mediaAPIKeyCapabilityCount(key, capability) > 0));
         if (candidate && candidate.id !== state.currentKeyId) await switchKey(candidate.id, capability, false, set, get);
     },
     select: async (apiKeyId, capability) => switchKey(apiKeyId, capability, true, set, get),
@@ -66,7 +88,7 @@ async function switchKey(apiKeyId: number, capability: MediaCapability, manual: 
     await ensureLoaded(set, get);
     const before = get();
     const candidate = before.keys.find((key) => key.id === apiKeyId);
-    if (!candidate || modelCount(candidate, capability) <= 0 || candidate.id === before.currentKeyId) return;
+    if (!candidate || mediaAPIKeyCapabilityCount(candidate, capability) <= 0 || candidate.id === before.currentKeyId) return;
     const sequence = ++requestSequence;
     mediaModelRequestEpoch += 1;
     switchController?.abort();
@@ -81,10 +103,18 @@ async function switchKey(apiKeyId: number, capability: MediaCapability, manual: 
         await mutation;
         serverSwitched = true;
         if (sequence !== requestSequence) return;
+        // 文本目录与图片/视频并行刷新，但失败不参与回滚：文本模型权限由 Sub2API 在调用时校验，
+        // 且 Media 的 text 目录在上游失败时按接口契约返回 502，不应因此把图片/视频的 Key 切换一起判失败。
+        const textModelsRefresh = fetchMediaModels("text", "", controller.signal).catch(() => null);
         const [imageModels, videoModels] = await Promise.all([fetchMediaModels("image", "", controller.signal), fetchMediaModels("video", "", controller.signal)]);
         if (sequence !== requestSequence) return;
         useConfigStore.getState().applyMediaModels("image", imageModels);
         useConfigStore.getState().applyMediaModels("video", videoModels);
+        void textModelsRefresh.then((textModels) => {
+            // 切换已被更新的请求覆盖、或本次切换失败回滚时，不写入旧 Key 的文本目录。
+            if (!textModels || sequence !== requestSequence || get().currentKeyId !== apiKeyId) return;
+            useConfigStore.getState().applyMediaModels("text", textModels);
+        });
         set((state) => ({
             currentKeyId: apiKeyId,
             keys: state.keys.map((key) => ({ ...key, current: key.id === apiKeyId })),
@@ -99,10 +129,6 @@ async function switchKey(apiKeyId: number, capability: MediaCapability, manual: 
         }
         set({ status: "ready", error: errorText(error, "切换 API Key 失败") });
     }
-}
-
-function modelCount(key: MediaAPIKey, capability: MediaCapability) {
-    return capability === "image" ? key.imageModelCount : key.videoModelCount;
 }
 
 function errorText(error: unknown, fallback: string) {

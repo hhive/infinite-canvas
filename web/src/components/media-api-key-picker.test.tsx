@@ -8,8 +8,8 @@ const { activate, select, state } = vi.hoisted(() => ({
     state: {
         config: { apiKey: "", channels: [{ apiKey: "" }] },
         keys: [
-            { id: 1, name: "绘图", maskedKey: "sk-****1234", groupName: "图片组", imageModelCount: 6, videoModelCount: 0 },
-            { id: 2, name: "视频", maskedKey: "sk-****5678", groupName: "视频组", imageModelCount: 0, videoModelCount: 4 },
+            { id: 1, name: "绘图", maskedKey: "sk-****1234", groupName: "图片组", imageModelCount: 6, videoModelCount: 0, textModelCount: 0 },
+            { id: 2, name: "视频", maskedKey: "sk-****5678", groupName: "视频组", imageModelCount: 0, videoModelCount: 4, textModelCount: 0 },
         ],
         currentKeyId: 1,
         status: "ready",
@@ -76,6 +76,23 @@ describe("MediaAPIKeyPicker", () => {
         render({ capability: "video" });
         expect(container.querySelectorAll("option")).toHaveLength(0);
         expect((container.querySelector("select") as HTMLSelectElement).disabled).toBe(true);
+    });
+
+    it("keeps every key selectable for text without a model count filter", () => {
+        state.keys.forEach((key) => { key.textModelCount = 0; });
+        render({ capability: "text" });
+        expect(container.querySelectorAll("option")).toHaveLength(2);
+        expect((container.querySelector("select") as HTMLSelectElement).disabled).toBe(false);
+        expect(activate).toHaveBeenCalledWith("text", false, true);
+    });
+
+    it("hides the image and video counts for text, they say nothing about text access", () => {
+        render({ capability: "text" });
+        const option = container.querySelector('option[value="1"]')?.textContent || "";
+        expect(option).toBe("绘图 · 图片组 · sk-****1234");
+        expect(option).not.toContain("图片 6");
+        expect(option).not.toContain("视频");
+        expect(container.textContent).not.toContain("文本");
     });
 
     it("is hidden in manual API key mode", () => {

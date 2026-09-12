@@ -1,6 +1,9 @@
 import axios from "axios";
 
-export type MediaCapability = "image" | "video";
+export type MediaCapability = "image" | "video" | "text";
+
+const capabilityLabels: Record<MediaCapability, string> = { image: "图片", video: "视频", text: "文本" };
+
 export type MediaChargeMode = "cnt" | "second";
 
 export type MediaModel = {
@@ -32,18 +35,19 @@ export async function fetchMediaModels(capability: MediaCapability, apiKey = "",
     });
     const imageEnvelope = response.data && typeof response.data === "object" && !Array.isArray(response.data) ? (response.data as Record<string, unknown>) : null;
 	const records = imageEnvelope?.object === "list" ? imageEnvelope.data : response.data;
-    if (!Array.isArray(records)) throw new Error(`${capability === "image" ? "图片" : "视频"}模型接口返回格式无效`);
+    if (!Array.isArray(records)) throw new Error(`${capabilityLabels[capability]}模型接口返回格式无效`);
     const seenIds = new Set<number>();
     const seenSelectionModels = new Set<string>();
     const models: MediaModel[] = [];
     for (const raw of records) {
         if (!raw || typeof raw !== "object") continue;
         const item = raw as Record<string, unknown>;
-        if (capability === "image") {
+        // 图片与文本的 id 就是模型名字符串，不要求数字 id；只有视频分支才强校验数字 id。
+        if (capability === "image" || capability === "text") {
             const model = stringValue(item.model_name) || stringValue(item.id);
             if (!model || seenSelectionModels.has(model)) continue;
             seenSelectionModels.add(model);
-            models.push({ id: model, mediaType: "image", model, displayName: stringValue(item.display_name) || model, providerName: stringValue(item.provider_name), apiMode: stringValue(item.api_mode), priceQuota: 0 });
+            models.push({ id: model, mediaType: capability, model, displayName: stringValue(item.display_name) || model, providerName: stringValue(item.provider_name), apiMode: stringValue(item.api_mode), priceQuota: 0 });
             continue;
         }
         const model = stringValue(item.model_name) || stringValue(item.display_name) || stringValue(item.model);

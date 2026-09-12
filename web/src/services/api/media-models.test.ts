@@ -96,4 +96,35 @@ describe("fetchMediaModels", () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: { data: [{ id: "gpt-image-2" }] } });
         await expect(fetchMediaModels("image")).rejects.toThrow("图片模型接口返回格式无效");
     });
+
+    it("keeps text model names as request identities from the object=list envelope", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({
+            data: {
+                object: "list",
+                data: [
+                    { id: "gpt-6-astra", model_name: "gpt-6-astra", display_name: "gpt-6-astra", media_type: "text", provider_name: "", api_mode: "responses", price_quota: 0 },
+                    { id: "gpt-5.5", model_name: "gpt-5.5", display_name: "GPT-5.5", media_type: "text" },
+                    { id: "gpt-6-astra", model_name: "gpt-6-astra", display_name: "重复记录" },
+                    { id: 12, display_name: "只有数字 id 的记录" },
+                    { id: "   " }, null, "not-an-object",
+                ],
+            },
+        });
+
+        await expect(fetchMediaModels("text", "sk-test")).resolves.toEqual([
+            { id: "gpt-6-astra", mediaType: "text", model: "gpt-6-astra", displayName: "gpt-6-astra", providerName: "", apiMode: "responses", priceQuota: 0 },
+            { id: "gpt-5.5", mediaType: "text", model: "gpt-5.5", displayName: "GPT-5.5", providerName: "", apiMode: "", priceQuota: 0 },
+        ]);
+        expect(axios.get).toHaveBeenCalledWith("/v1/models", {
+            headers: { Authorization: "Bearer sk-test" },
+            params: { media_type: "text" },
+            signal: undefined,
+            withCredentials: true,
+        });
+    });
+
+    it("rejects a text model envelope without object=list", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: { data: [{ id: "gpt-6-astra" }] } });
+        await expect(fetchMediaModels("text")).rejects.toThrow("文本模型接口返回格式无效");
+    });
 });

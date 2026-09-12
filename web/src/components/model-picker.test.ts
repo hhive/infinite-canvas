@@ -35,7 +35,7 @@ afterEach(() => {
         isConfigOpen: false,
         shouldPromptContinue: false,
         configTab: "channels",
-        mediaModels: { image: [], video: [] },
+        mediaModels: { image: [], video: [], text: [] },
     });
 });
 
@@ -150,7 +150,7 @@ describe("ModelPicker", () => {
             imageModels: [imageValue],
             videoModels: [videoValue],
         };
-        useConfigStore.setState({ mediaModels: { image: [imageModel], video: [videoModel] } });
+        useConfigStore.setState({ mediaModels: { image: [imageModel], video: [videoModel], text: [] } });
 
         act(() => {
             root.render(
@@ -168,6 +168,7 @@ describe("ModelPicker", () => {
                 mediaModels: {
                     image: [{ ...imageModel, displayName: "Image After" }],
                     video: [{ ...videoModel, displayName: "Video After", priceQuota: 9 }],
+                    text: [],
                 },
             });
         });
@@ -180,6 +181,23 @@ describe("ModelPicker", () => {
         expect(container.querySelector(`[data-value="${videoValue}"]`)?.getAttribute("data-text-value")).toContain("Video After");
     });
 
+    it("uses the text media catalog for text labels", () => {
+        const textModel = { id: "gpt-6-astra", mediaType: "text" as const, model: "gpt-6-astra", displayName: "反推默认模型", providerName: "自营", apiMode: "responses", priceQuota: 0 };
+        const value = `default::${textModel.model}`;
+        const config = {
+            ...defaultConfig,
+            channels: [{ ...defaultConfig.channels[0], models: [textModel.model] }],
+            models: [value],
+            textModels: [value],
+        };
+        useConfigStore.setState({ mediaModels: { image: [], video: [], text: [textModel] } });
+
+        renderPicker({ config, value, capability: "text", onChange: vi.fn() });
+
+        expect(container.querySelector<HTMLButtonElement>("button[title]")?.title).toBe("反推默认模型 · 自营");
+        expect(container.querySelector(`[data-value="${value}"]`)?.getAttribute("data-text-value")).toContain("反推默认模型");
+    });
+
     it("keeps responsive visibility separate from the selected video layout", () => {
         const model = { id: 1, mediaType: "video" as const, model: "video-1", displayName: "A very long video model name", providerName: "OpenAI", apiMode: "videos", priceQuota: 12, chargeMode: "cnt" as const };
         const config = {
@@ -188,7 +206,7 @@ describe("ModelPicker", () => {
             models: [`default::${model.model}`],
             videoModels: [`default::${model.model}`],
         };
-        useConfigStore.setState({ mediaModels: { image: [], video: [model] } });
+        useConfigStore.setState({ mediaModels: { image: [], video: [model], text: [] } });
 
         renderPicker({ config, value: `default::${model.model}`, capability: "video", onChange: vi.fn() });
 
@@ -229,7 +247,7 @@ describe("ModelPicker", () => {
             models: [`default::${model.model}`],
             videoModels: [`default::${model.model}`],
         };
-        useConfigStore.setState({ mediaModels: { image: [], video: [model] } });
+        useConfigStore.setState({ mediaModels: { image: [], video: [model], text: [] } });
 
         renderPicker({ config, value: `default::${model.model}`, capability: "video", onChange: vi.fn() });
 
@@ -276,7 +294,7 @@ describe("ModelPicker", () => {
             models: models.map((model) => `default::${model.model}`),
             imageModels: models.map((model) => `default::${model.model}`),
         };
-        useConfigStore.setState({ mediaModels: { image: models, video: [] } });
+        useConfigStore.setState({ mediaModels: { image: models, video: [], text: [] } });
 
         renderPicker({ config, value: "default::gpt-image-2", capability: "image", onChange: vi.fn() });
 
