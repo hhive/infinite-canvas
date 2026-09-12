@@ -12,7 +12,7 @@ import { normalizeInterruptedVideoGeneration, resumeCanvasVideoTasks } from "@/l
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { isVideoTaskFailed, previewGeneratedVideo, requestVideoGeneration, resumeVideoGenerationTask, storeGeneratedVideo, type VideoGenerationResult, type VideoGenerationTask } from "@/services/api/video";
 import { DOCS_URL } from "@/constant/env";
-import { defaultConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, readEffectiveConfig, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadGeneratedImage, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -393,6 +393,9 @@ function InfiniteCanvasPage() {
         }
 
         const restore = async () => {
+            // 按调用时刻读取配置：不能把它当响应式依赖，否则每次模型目录刷新（applyMediaModels）
+            // 都会重跑项目加载与任务恢复，与 picker 的自动切 Key 形成自持闭环。
+            const restoreConfig = readEffectiveConfig();
             const restoredNodes = await hydrateCanvasImages(normalizeInterruptedVideoGeneration(resetInterruptedImageGeneration(project.nodes)));
             const restoredSessions = await hydrateAssistantImages(project.chatSessions || []);
             setNodes(restoredNodes);
@@ -404,10 +407,10 @@ function InfiniteCanvasPage() {
             setViewport(project.viewport);
             historyRef.current = { past: [], future: [] };
             void resumeCanvasImageTasks<ImageTask, { id: string; dataUrl: string }>(restoredNodes, {
-                getAuthIdentity: () => imageTaskAuthIdentity(effectiveConfig.apiKey),
+                getAuthIdentity: () => imageTaskAuthIdentity(restoreConfig.apiKey),
                 start: (node) => startGenerationRequest(node.id, node.id, node.id),
                 finish: (node, controller) => finishGenerationRequest(node.id, controller),
-                resume: (taskId, signal, onTask) => resumeImageTask(taskId, effectiveConfig.apiKey, { signal, onTask }),
+                resume: (taskId, signal, onTask) => resumeImageTask(taskId, restoreConfig.apiKey, { signal, onTask }),
                 onTask: (node, task) => trackCanvasImageTask(node.id, task),
                 onCompleted: async (node, image) => {
                     const uploaded = await uploadGeneratedImage(image.dataUrl);
@@ -417,13 +420,13 @@ function InfiniteCanvasPage() {
                 onError: (node, error) => setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: error instanceof Error ? error.message : "恢复任务失败" } } : item))),
             });
             void resumeCanvasVideoTasks<VideoGenerationTask, VideoGenerationResult, UploadedFile>(restoredNodes, {
-                getAuthIdentity: () => imageTaskAuthIdentity(effectiveConfig.apiKey),
+                getAuthIdentity: () => imageTaskAuthIdentity(restoreConfig.apiKey),
                 start: (node) => startGenerationRequest(node.id, node.id, node.id),
                 finish: (node, controller) => finishGenerationRequest(node.id, controller),
-                resume: (node, signal, onTask) => resumeVideoGenerationTask(buildGenerationConfig(effectiveConfig, node, "video"), {
+                resume: (node, signal, onTask) => resumeVideoGenerationTask(buildGenerationConfig(restoreConfig, node, "video"), {
                     id: node.metadata!.videoTaskId!,
                     modelConfigId: node.metadata!.videoTaskModelConfigId || 0,
-                    model: node.metadata!.model || effectiveConfig.videoModel,
+                    model: node.metadata!.model || restoreConfig.videoModel,
                     status: node.metadata!.videoTaskStatus as VideoGenerationTask["status"],
                 }, { signal, onTask }),
                 onTask: (node, task) => trackCanvasVideoTask(node.id, task),
@@ -448,7 +451,7 @@ function InfiniteCanvasPage() {
             setProjectLoaded(true);
         };
         void restore();
-    }, [effectiveConfig, finishGenerationRequest, hydrated, navigate, openProject, projectId, startGenerationRequest, trackCanvasImageTask, trackCanvasVideoTask]);
+    }, [finishGenerationRequest, hydrated, navigate, openProject, projectId, startGenerationRequest, trackCanvasImageTask, trackCanvasVideoTask]);
 
     useEffect(() => {
         if (!projectLoaded || !["new", "recent", "choose"].includes(searchParams.get("mode") || "")) return;

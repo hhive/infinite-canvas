@@ -367,6 +367,16 @@ export function useEffectiveConfig() {
     return useMemo(() => ({ ...config, channelMode: "local" as const }), [config]);
 }
 
+/**
+ * 按调用时刻从 store 读取有效配置，语义与 useEffectiveConfig 一致。
+ *
+ * 供不能在响应式依赖里持有 config 的场景使用：applyMediaModels 每次刷新模型目录都会替换
+ * config 对象，若把派生值当作依赖，一次性流程（项目加载、任务恢复）会被反复重跑。
+ */
+export function readEffectiveConfig(): AiConfig {
+    return { ...useConfigStore.getState().config, channelMode: "local" as const };
+}
+
 function normalizeCapabilityModelList(models: string[] | undefined, channels: ModelChannel[], capability: ModelCapability) {
     const available = channels.flatMap((channel) => channelModels(channel).filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name)));
     if (!Array.isArray(models)) return available;

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { act, createElement, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -282,5 +285,25 @@ describe("resolveTextModelWriteback", () => {
         expect(resolveTextModelWriteback("config-1", "node-model", undefined)).toBeNull();
         expect(resolveTextModelWriteback("config-1", "node-model", "")).toBeNull();
         expect(resolveTextModelWriteback("", "node-model", "gpt-6-astra")).toBeNull();
+    });
+});
+
+describe("项目加载 effect 的依赖契约", () => {
+    it("加载项目与恢复任务的 effect 不得依赖 effectiveConfig", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
+        const matched = /void restore\(\);\s*\},\s*\[([^\]]*)\]/.exec(source);
+        expect(matched, "未能定位项目加载 effect 的依赖数组").not.toBeNull();
+        // effectiveConfig 由 config 派生、每次模型目录刷新都会换新身份（applyMediaModels），
+        // 一旦成为该 effect 的依赖，就会形成「切 Key → 目录刷新 → 重载项目并恢复任务 →
+        // 恢复任务触发生成 → 生成翻转 taskActive → picker 自动切 Key」的自持闭环。
+        expect(matched![1]).not.toContain("effectiveConfig");
+    });
+
+    it("恢复流程按调用时刻读取配置，而不是捕获响应式的 effectiveConfig", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
+        const restoreBody = /const restore = async \(\) => \{([\s\S]*?)\n        \};/.exec(source);
+        expect(restoreBody, "未能定位 restore 函数体").not.toBeNull();
+        expect(restoreBody![1]).toContain("readEffectiveConfig()");
+        expect(restoreBody![1]).not.toContain("effectiveConfig.");
     });
 });
