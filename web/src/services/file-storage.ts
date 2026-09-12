@@ -9,9 +9,22 @@ export type UploadedFile = { url: string; storageKey: string; bytes: number; mim
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
 const objectUrls = new Map<string, string>();
 
-/** 该错误会经插件链路冒到界面，必须走 i18n；detail 只放 content-type 或 HTTP 状态码，不带 URL 与凭据。 */
-function mediaResponseError(detail: string) {
-    return new Error(i18n.t("apiErrors.mediaResponseInvalid", { detail }));
+/**
+ * 内容被判定为"不是媒体"时抛出的专用错误。
+ *
+ * 必须可与网络/超时类失败区分：调用方对后者的处理是回退成远端 URL 继续流式播放，
+ * 而前者若也静默回退，节点就会保留一个确定播不了的地址且无人知晓（事故原路径即如此）。
+ */
+export class MediaContentError extends Error {
+    constructor(detail: string) {
+        super(i18n.t("apiErrors.mediaResponseInvalid", { detail }));
+        this.name = "MediaContentError";
+    }
+}
+
+/** detail 只放 content-type，不带 URL 与凭据。 */
+function mediaContentError(detail: string) {
+    return new MediaContentError(detail);
 }
 
 /**
@@ -28,9 +41,11 @@ function isNonMediaContentType(contentType: string) {
 
 export async function fetchMediaBlob(url: string) {
     const response = await fetch(withLocalProxy(url));
-    if (!response.ok) throw mediaResponseError(`HTTP ${response.status}`);
+    // 状态码失败多为瞬时（5xx/网络），保持普通 Error，让调用方沿用"回退成远端 URL"的策略；
+    // 只有内容确证不是媒体时才用 MediaContentError 向上冒泡。
+    if (!response.ok) throw new Error(i18n.t("apiErrors.mediaResponseInvalid", { detail: `HTTP ${response.status}` }));
     const contentType = response.headers.get("content-type") || "";
-    if (isNonMediaContentType(contentType)) throw mediaResponseError(contentType);
+    if (isNonMediaContentType(contentType)) throw mediaContentError(contentType);
     return await response.blob();
 }
 
@@ -41,7 +56,7 @@ export async function fetchMediaBlob(url: string) {
  * 一旦如此，`uploadMediaFile` 的 Blob 分支就再也拦不住错误页了，所以改写之前必须先过这道闸。
  */
 export function assertMediaBlob(blob: Blob) {
-    if (isNonMediaContentType(blob.type)) throw mediaResponseError(blob.type);
+    if (isNonMediaContentType(blob.type)) throw mediaContentError(blob.type);
 }
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {

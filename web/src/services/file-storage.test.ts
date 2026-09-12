@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const storage = vi.hoisted(() => new Map<string, Blob>());
@@ -23,7 +26,7 @@ vi.mock("nanoid", () => ({ nanoid: () => "fixed-id" }));
 
 import { storeGeneratedAudio } from "@/services/api/audio";
 import { storeGeneratedVideo } from "@/services/api/video";
-import { uploadMediaFile } from "@/services/file-storage";
+import { MediaContentError, uploadMediaFile } from "@/services/file-storage";
 
 const HTML_ERROR_PAGE = "<!doctype html><html><body>media playground</body></html>";
 const MP4_BYTES = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
@@ -147,14 +150,34 @@ describe("媒体落盘前的响应类型校验", () => {
         expect(setItemMock).not.toHaveBeenCalled();
     });
 
-    it("storeGeneratedVideo 抓到错误页时回退为远端地址，不再写坏本地缓存", async () => {
+    it("storeGeneratedVideo 抓到错误页时向上抛错，而不是静默回退成肯定播不了的地址", async () => {
         stubFetch(responseFor(HTML_ERROR_PAGE, { contentType: "text/html" }));
+
+        await expect(storeGeneratedVideo({ url: "https://media.example.test/file_task/x.mp4", mimeType: "video/mp4" })).rejects.toThrow(MediaContentError);
+        expect(setItemMock).not.toHaveBeenCalled();
+    });
+
+    it("storeGeneratedVideo 对非媒体判定之外的失败仍回退远端地址（瞬时失败不得当成坏内容）", async () => {
+        // 500 走的是状态码分支（普通 Error），不是内容判定，应当保留 URL 回退让节点继续流式播放
+        stubFetch(responseFor("<html>boom</html>", { status: 500, contentType: "text/html" }));
 
         const stored = await storeGeneratedVideo({ url: "https://media.example.test/file_task/x.mp4", mimeType: "video/mp4" });
 
         expect(stored.url).toBe("https://media.example.test/file_task/x.mp4");
         expect(stored.storageKey).toBe("");
-        expect(setItemMock).not.toHaveBeenCalled();
+    });
+
+    it("assertVideoBlob 先解析 JSON 错误体再落媒体守卫（私有函数，用源码契约锁住）", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/services/api/video.ts"), "utf8");
+        const matched = /async function assertVideoBlob\(blob: Blob\) \{([\s\S]*?)\n\}/.exec(source);
+        expect(matched, "未能定位 assertVideoBlob 函数体").not.toBeNull();
+        const body = matched![1];
+
+        // 该守卫是私有函数、经公开路径触达需要拉起 axios，故用源码契约锁住两点：
+        expect(body).toContain("assertMediaBlob(blob)");
+        // JSON 分支必须排在前面，否则上游 msg 会被通用的"不是媒体内容"覆盖，诊断退化
+        expect(body.indexOf("json")).toBeGreaterThanOrEqual(0);
+        expect(body.indexOf("json")).toBeLessThan(body.indexOf("assertMediaBlob(blob)"));
     });
 
     // 音频侧会在落盘前把内容强制改写成 audio/*，改写之后 uploadMediaFile 的类型判定就失效了，
@@ -164,7 +187,9 @@ describe("媒体落盘前的响应类型校验", () => {
         expect(setItemMock).not.toHaveBeenCalled();
     });
 
-    it("视频：非媒体 blob 不得落盘（blob 分支没有 URL 可回退，更不能写坏本地缓存）", async () => {
+    // 注意：这条锁的是 uploadMediaFile 内既有的落盘闸门（file-storage），
+    // 并没有覆盖 assertVideoBlob —— 后者由下面那条源码契约用例覆盖。
+    it("视频：非媒体 blob 不得落盘（锁 file-storage 的落盘闸门）", async () => {
         await expect(storeGeneratedVideo({ blob: new Blob([HTML_ERROR_PAGE], { type: "text/html" }) })).rejects.toThrow();
         expect(setItemMock).not.toHaveBeenCalled();
     });

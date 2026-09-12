@@ -5,7 +5,7 @@ import i18n from "@/i18n";
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { clampVideoSeconds, computeVideoSize, inferVideoRatio } from "@/lib/media-size";
 import { boolConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/lib/seedance-video";
-import { assertMediaBlob, getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { assertMediaBlob, getMediaBlob, MediaContentError, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { runModelPlugin } from "@/services/api/model-plugin";
 import { buildApiUrl, modelOptionName, resolveModelChannel, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig } from "@/stores/use-config-store";
@@ -240,7 +240,10 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     if (result.url) {
         try {
             return await settleWithin(uploadMediaFile(result.url, "video"), GENERATED_VIDEO_LOCAL_STORE_TIMEOUT_MS);
-        } catch {
+        } catch (error) {
+            // 内容确证不是媒体时向上抛，让调用方把失败显示出来；
+            // 超时/网络类失败仍回退成远端 URL，节点照常流式播放。
+            if (error instanceof MediaContentError) throw error;
             return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
         }
     }
@@ -462,6 +465,9 @@ async function videoResultFromUrl(url: string, options?: RequestOptions): Promis
         return { blob: response.data };
     } catch (error) {
         if (axios.isCancel(error) || options?.signal?.aborted) throw error;
+        // 非媒体内容不能静默回退成 URL：那会让节点保留一个确定播不了的地址且无人知晓，
+        // 正是 2026-09-12 归档路由断裂时的表现。网络/超时类失败仍回退，由调用方流式播放。
+        if (error instanceof MediaContentError) throw error;
         return { url, mimeType: "video/mp4" };
     }
 }
@@ -644,17 +650,20 @@ function statusMessage(status: number | undefined, fallback: string) {
 }
 
 async function assertVideoBlob(blob: Blob) {
-    // 与音频侧对称：错误页（text/html 等）必须在变成 result.blob 之前拦下。
-    // 到了 storeGeneratedVideo 的 blob 分支就没有 URL 可回退了，且会被永久写成本地缓存。
-    assertMediaBlob(blob);
-    if (!blob.type.includes("json")) return;
-    try {
-        const payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
+    // 先解析 JSON 错误体：上游返回的 msg 比通用的「不是媒体内容」更有诊断价值。
+    // 解析不出有效错误体时不再直接放行，而是落到下面的守卫按非媒体内容拒绝。
+    if (blob.type.includes("json")) {
+        let payload: { code?: number; msg?: string; error?: { message?: string } } = {};
+        try {
+            payload = JSON.parse(await blob.text()) as typeof payload;
+        } catch {
+            payload = {};
+        }
         if (payload.code || payload.msg || payload.error?.message) throw new Error(readApiErrorMessage(payload) || apiText("noPlayableVideo"));
-    } catch (error) {
-        if (error instanceof SyntaxError) return;
-        throw error;
     }
+    // 与音频侧对称：错误页（text/html 等）必须在变成 result.blob 之前拦下，
+    // 到了 storeGeneratedVideo 的 blob 分支就没有 URL 可回退，且会被永久写成本地缓存。
+    assertMediaBlob(blob);
 }
 
 function isPublicMediaUrl(value: string) {

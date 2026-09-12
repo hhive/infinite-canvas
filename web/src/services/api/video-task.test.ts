@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const { runModelPlugin, uploadMediaFile } = vi.hoisted(() => ({ runModelPlugin: vi.fn(), uploadMediaFile: vi.fn() }));
 
 vi.mock("@/services/api/model-plugin", () => ({ runModelPlugin }));
-vi.mock("@/services/file-storage", () => ({ getMediaBlob: vi.fn(), uploadMediaFile }));
+// MediaContentError 必须提供：storeGeneratedVideo 用 `instanceof` 区分"内容不是媒体"与"瞬时失败"，
+// 缺失时该分支会因 mock 无此导出而抛错，把回退用例变成假失败。
+vi.mock("@/services/file-storage", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@/services/file-storage")>();
+    return { getMediaBlob: vi.fn(), uploadMediaFile, MediaContentError: actual.MediaContentError };
+});
 
 import { GENERATED_VIDEO_LOCAL_STORE_TIMEOUT_MS, createVideoGenerationTask, pollVideoGenerationTask, previewGeneratedVideo, requestVideoGeneration, resumeVideoGenerationTask, storeGeneratedVideo, validateVideoReferenceCounts, type VideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
