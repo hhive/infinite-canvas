@@ -6,12 +6,17 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes, getGroupResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import { sampleVideoFrames, type SampledVideoFrame } from "@/lib/canvas/video-frame-sampling";
+
+/** 一个参考视频抽出的帧；抽帧失败的视频保留占位，frames 为空数组。 */
+export type NodeGenerationVideoFrames = { videoId: string; frames: SampledVideoFrame[] };
 
 export type NodeGenerationContext = {
     prompt: string;
     referenceImages: ReferenceImage[];
     referenceVideos: ReferenceVideo[];
     referenceAudios: ReferenceAudio[];
+    videoFrames: NodeGenerationVideoFrames[];
     textCount: number;
     imageCount: number;
     videoCount: number;
@@ -56,6 +61,8 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         referenceImages,
         referenceVideos,
         referenceAudios,
+        // 抽帧是异步的，放在 hydrateNodeGenerationContext 里补齐；这里只保证结构完整。
+        videoFrames: [],
         textCount: resourceInputs.filter((input) => input.type === "text").length,
         imageCount: referenceImages.length,
         videoCount: referenceVideos.length,
@@ -106,6 +113,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
             referenceImages: [],
             referenceVideos: [],
             referenceAudios: [],
+            videoFrames: [],
             textCount: 0,
             imageCount: 0,
             videoCount: 0,
@@ -118,6 +126,7 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
         referenceImages,
         referenceVideos,
         referenceAudios,
+        videoFrames: [],
         textCount: counts.text,
         imageCount: referenceImages.length,
         videoCount: referenceVideos.length,
@@ -156,22 +165,47 @@ function readNodeGenerationResource(node: CanvasNodeData): NodeGenerationResourc
     return text ? [{ nodeId: node.id, type: "text", title: node.title, text }] : [];
 }
 
+/** 视频帧的文本标注，帮助模型把每一帧放回时间轴上。时间戳保留一位小数。 */
+export function videoFrameLabel(videoIndex: number, frameIndex: number, timestampMs: number) {
+    return `【视频${videoIndex} 第${frameIndex}帧 @${(timestampMs / 1000).toFixed(1)} s】`;
+}
+
 export function buildNodeResponseMessages(context: NodeGenerationContext): AiTextMessage[] {
-    if (!context.referenceImages.length) {
+    const videoFrameMessages = context.videoFrames.flatMap((video, videoIndex) =>
+        video.frames.flatMap((frame, frameIndex) => [
+            { type: "text" as const, text: videoFrameLabel(videoIndex + 1, frameIndex + 1, frame.timestampMs) },
+            { type: "image_url" as const, image_url: { url: frame.dataUrl } },
+        ]),
+    );
+    if (!context.referenceImages.length && !videoFrameMessages.length) {
         return [{ role: "user", content: context.prompt }];
     }
 
     return [
         {
             role: "user",
-            content: [{ type: "text" as const, text: context.prompt }, ...context.referenceImages.map((image) => ({ type: "image_url" as const, image_url: { url: image.dataUrl } }))],
+            content: [{ type: "text" as const, text: context.prompt }, ...context.referenceImages.map((image) => ({ type: "image_url" as const, image_url: { url: image.dataUrl } })), ...videoFrameMessages],
         },
     ];
 }
 
 export async function hydrateNodeGenerationContext(context: NodeGenerationContext) {
-    const { imageToDataUrl } = await import("@/services/image-storage");
-    return { ...context, referenceImages: await Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))) };
+    // 先把两个动态依赖一起取回来，图片 hydrate 与视频抽帧才能真正在同一个 tick 里并发启动。
+    const [{ imageToDataUrl }, { resolveMediaUrl }] = await Promise.all([import("@/services/image-storage"), import("@/services/file-storage")]);
+    const [referenceImages, videoFrames] = await Promise.all([Promise.all(context.referenceImages.map(async (image) => ({ ...image, dataUrl: await imageToDataUrl(image) }))), hydrateVideoFrames(context.referenceVideos, resolveMediaUrl)]);
+    return { ...context, referenceImages, videoFrames };
+}
+
+/**
+ * 并行抽取参考视频的关键帧。
+ * 取舍：单个视频抽帧失败（编码不支持、CORS、地址失效等）只让该视频降级为不附带帧，不能让整次生成失败——
+ * 视频反推本来就是增强能力，失败时退回到「只有提示词与图片」的既有链路即可。
+ * 失败的视频仍保留占位项，这样帧标注里的「视频N」编号始终与参考视频列表的顺序一致。
+ */
+async function hydrateVideoFrames(videos: ReferenceVideo[], resolveMediaUrl: (storageKey?: string, fallback?: string) => Promise<string>): Promise<NodeGenerationVideoFrames[]> {
+    if (!videos.length) return [];
+    const results = await Promise.allSettled(videos.map(async (video): Promise<NodeGenerationVideoFrames> => ({ videoId: video.id, frames: await sampleVideoFrames({ source: await resolveMediaUrl(video.storageKey, video.url) }) })));
+    return results.map((result, index) => (result.status === "fulfilled" ? result.value : { videoId: videos[index].id, frames: [] }));
 }
 
 function readNodeTextInput(node: CanvasNodeData) {

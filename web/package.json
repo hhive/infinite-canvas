@@ -30,6 +30,7 @@
         "i18next": "^26.3.6",
         "localforage": "^1.10.0",
         "lucide-react": "^1.16.0",
+        "mediabunny": "1.56",
         "motion": "^12.38.0",
         "nanoid": "^5.1.11",
         "radix-ui": "^1.4.3",

@@ -58,6 +58,8 @@ import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canU
 import { getNodeDefinition, isBuiltinNodeType, isBuiltinNodeType as isBuiltinType, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
 import { buildTextModelAttempts, resolveTextModelCandidates, retryTextModelAttempts, type TextModelAttempt } from "@/lib/canvas/text-model-fallback";
 import { ensureMediaAPIKeysLoaded, ensureMediaModelsLoaded, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
+// 反推节点的默认标题在模块级构造，拿不到 useTranslation 的 t，沿用组件层同样的 i18n 实例。
+import i18n from "@/i18n";
 import { registerBuiltinNodes } from "@/components/canvas/nodes/builtin-nodes";
 import { CanvasPluginManagerModal } from "@/components/canvas/canvas-plugin-manager-modal";
 import { CanvasRefreshShell } from "@/components/canvas/canvas-refresh-shell";
@@ -128,6 +130,80 @@ const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用�
 1. 只输出提示词正文，不要解释。
 2. 覆盖主体、构图、风格、光线、色彩、材质、镜头和氛围。
 3. 尽量写成可直接用于生图模型的完整提示词。`;
+
+// 视频反推不能照抄图片版：抽帧得到的是若干张静态图，帧间运动与时间先后只能靠帧标注传达，
+// 因此必须显式要求还原动作先后、镜头运动与变化过程，否则模型只会描述单帧画面。
+const VIDEO_PROMPT_REVERSE_PRESET = `请根据参考视频的关键帧反推一段适合用于 AI 生成视频的提示词。
+
+要求：
+1. 只输出提示词正文，不要解释。
+2. 覆盖主体、动作与运动、场景、构图、镜头运动、光线、色彩、材质和氛围。
+3. 结合各帧的时间标注还原动作的先后与变化。
+4. 尽量写成可直接用于视频生成模型的完整提示词。`;
+
+/** 视频反推的构造结果：两个新节点与两条连线，由调用方一次性写入画布。 */
+export type VideoReversePromptPlan = {
+    textNode: CanvasNodeData;
+    configNode: CanvasNodeData;
+    connections: CanvasConnection[];
+};
+
+/** 视频反推的前置条件：必须是视频节点，且已有可解码的内容（抽帧在生成时按 content 进行）。 */
+export function canReversePromptFromVideoNode(node: CanvasNodeData): boolean {
+    return node.type === CanvasNodeType.Video && Boolean(node.metadata?.content);
+}
+
+/**
+ * 视频反推的节点与连线构造，与 {@link IMAGE_PROMPT_REVERSE_PRESET} 一侧的图片反推对称：
+ * 文本节点（预置视频反推提示词）+ 配置节点（文本模式）并排放在视频节点右侧，
+ * 连线 `视频节点 → 配置节点`、`文本节点 → 配置节点`。
+ *
+ * 纯函数：不写画布、不弹提示、不发起请求。节点为空或不是视频节点时返回 null，
+ * 由调用方决定提示文案（工具栏入口只在有内容时出现，这个分支主要服务程序化调用）。
+ *
+ * 模型按三级顺序解析：文本模型目录候选（节点尚未有用户选择，故 selectedModel 传空）→
+ * 配置节点文本模型 → 通用模型 → 默认文本模型。目录为空是常态（Key 未加载或该 Key 无文本模型）。
+ */
+export function buildVideoReversePromptNodes(node: CanvasNodeData, textModels: readonly string[], fallbackModels: readonly (string | undefined)[] = []): VideoReversePromptPlan | null {
+    if (!canReversePromptFromVideoNode(node)) return null;
+
+    const reverseModel = resolveTextModelCandidates("", textModels)[0] || fallbackModels.map((model) => (typeof model === "string" ? model.trim() : "")).find(Boolean) || "";
+
+    const gap = 96;
+    const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+    const configSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
+    const centerY = node.position.y + node.height / 2;
+    const textNode: CanvasNodeData = {
+        ...createCanvasNode(
+            CanvasNodeType.Text,
+            { x: node.position.x + node.width + gap + textSpec.width / 2, y: centerY },
+            { content: VIDEO_PROMPT_REVERSE_PRESET, prompt: VIDEO_PROMPT_REVERSE_PRESET, status: NODE_STATUS_SUCCESS, fontSize: 14 },
+        ),
+        title: i18n.t("canvas.projectPage.reverseVideoTitle"),
+    };
+    const configNode: CanvasNodeData = {
+        ...createCanvasNode(
+            CanvasNodeType.Config,
+            { x: textNode.position.x + textNode.width + gap + configSpec.width / 2, y: centerY },
+            {
+                generationMode: "text",
+                model: reverseModel,
+                count: 1,
+                composerContent: i18n.t("canvas.projectPage.reverseVideoComposer", { videoId: node.id, textId: textNode.id }),
+            },
+        ),
+        title: i18n.t("canvas.projectPage.reverseVideoConfigTitle"),
+    };
+
+    return {
+        textNode,
+        configNode,
+        connections: [
+            { id: nanoid(), fromNodeId: node.id, toNodeId: configNode.id },
+            { id: nanoid(), fromNodeId: textNode.id, toNodeId: configNode.id },
+        ],
+    };
+}
 
 function applyGeneratedVideo(item: CanvasNodeData, video: UploadedFile, extra: CanvasNodeData["metadata"] = {}): CanvasNodeData {
     const videoSize = fitNodeSize(video.width || item.width, video.height || item.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
@@ -1861,6 +1937,36 @@ function InfiniteCanvasPage() {
         [effectiveConfig.model, effectiveConfig.textModel, message],
     );
 
+    /**
+     * 视频反推入口：与图片反推对称，只是参考节点换成视频——抽帧在生成阶段按 videoFrames 自动进行，
+     * 这里只负责建节点与连线。模型解析复用同一套三级顺序。
+     */
+    const createVideoReversePromptNodes = useCallback(
+        async (node: CanvasNodeData) => {
+            if (!canReversePromptFromVideoNode(node)) {
+                message.warning(t("canvas.projectPage.emptyVideoReverse"));
+                return;
+            }
+
+            // 文本模型目录属于当前 Key（同源）；目录还没加载时先补一次，失败会静默回退到节点已选模型。
+            const textModels = await ensureMediaModelsLoaded("text");
+            const plan = buildVideoReversePromptNodes(node, textModels.map((item) => item.model), [effectiveConfig.textModel, effectiveConfig.model, defaultConfig.textModel]);
+            // 上面的前置校验已经拦掉空节点，这里只用于收窄类型；真走到也按同一口径提示。
+            if (!plan) {
+                message.warning(t("canvas.projectPage.emptyVideoReverse"));
+                return;
+            }
+
+            setNodes((prev) => [...prev, plan.textNode, plan.configNode]);
+            setConnections((prev) => [...prev, ...plan.connections]);
+            setSelectedNodeIds(new Set([plan.configNode.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(plan.configNode.id);
+            setContextMenu(null);
+        },
+        [effectiveConfig.model, effectiveConfig.textModel, message, t],
+    );
+
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
         if (!node.metadata?.content) return;
         const cropped = await cropDataUrl(node.metadata.content, crop);
@@ -3156,6 +3262,7 @@ function InfiniteCanvasPage() {
                     onAngle={(node) => setAngleNodeId(node.id)}
                     onViewImage={handleNodeViewImage}
                     onReversePrompt={createImageReversePromptNodes}
+                    onReverseVideoPrompt={createVideoReversePromptNodes}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}

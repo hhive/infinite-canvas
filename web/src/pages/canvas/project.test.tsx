@@ -5,7 +5,7 @@ import { act, createElement, type ComponentProps, type ReactElement, type ReactN
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildCanvasTextAttempts, buildPluginBuiltinPrompt, CanvasTopBar, hasActiveCanvasMediaTask, prepareCanvasTextAttempts, resolveTextModelWriteback } from "@/pages/canvas/project";
+import { buildCanvasTextAttempts, buildPluginBuiltinPrompt, buildVideoReversePromptNodes, canReversePromptFromVideoNode, CanvasTopBar, hasActiveCanvasMediaTask, prepareCanvasTextAttempts, resolveTextModelWriteback } from "@/pages/canvas/project";
 import { retryTextModelAttempts, TextModelFallbackError } from "@/lib/canvas/text-model-fallback";
 import type { MediaAPIKey } from "@/services/api/media-api-keys";
 import { useConfigStore } from "@/stores/use-config-store";
@@ -285,6 +285,102 @@ describe("resolveTextModelWriteback", () => {
         expect(resolveTextModelWriteback("config-1", "node-model", undefined)).toBeNull();
         expect(resolveTextModelWriteback("config-1", "node-model", "")).toBeNull();
         expect(resolveTextModelWriteback("", "node-model", "gpt-6-astra")).toBeNull();
+    });
+});
+
+describe("视频反推提示词入口", () => {
+    function videoNode(overrides: Partial<CanvasNodeData> = {}): CanvasNodeData {
+        return {
+            id: "video-1",
+            type: CanvasNodeType.Video,
+            title: "视频",
+            position: { x: 100, y: 200 },
+            width: 320,
+            height: 180,
+            metadata: { content: "https://example.test/clip.mp4" },
+            ...overrides,
+        };
+    }
+
+    it("空视频节点与图片节点都不参与视频反推，也不创建任何节点", () => {
+        const emptyVideo = videoNode({ metadata: {} });
+        const missingContent = videoNode({ metadata: { content: "" } });
+        const image = videoNode({ id: "image-1", type: CanvasNodeType.Image });
+
+        expect(canReversePromptFromVideoNode(emptyVideo)).toBe(false);
+        expect(canReversePromptFromVideoNode(missingContent)).toBe(false);
+        expect(canReversePromptFromVideoNode(image)).toBe(false);
+        expect(canReversePromptFromVideoNode(videoNode())).toBe(true);
+
+        expect(buildVideoReversePromptNodes(emptyVideo, ["catalog-a"])).toBeNull();
+        expect(buildVideoReversePromptNodes(missingContent, ["catalog-a"])).toBeNull();
+        expect(buildVideoReversePromptNodes(image, ["catalog-a"])).toBeNull();
+    });
+
+    it("创建文本节点与配置节点，并连出视频→配置、文本→配置两条连线", () => {
+        const node = videoNode();
+        const plan = buildVideoReversePromptNodes(node, ["catalog-a"]);
+        expect(plan).not.toBeNull();
+        const { textNode, configNode, connections } = plan!;
+
+        expect(textNode.type).toBe(CanvasNodeType.Text);
+        expect(configNode.type).toBe(CanvasNodeType.Config);
+        // 与图片反推同向排列：文本节点在视频节点右侧，配置节点再往右，三者垂直居中对齐
+        expect(textNode.position.x).toBeGreaterThan(node.position.x + node.width);
+        expect(configNode.position.x).toBeGreaterThan(textNode.position.x + textNode.width);
+        expect(textNode.position.y + textNode.height / 2).toBeCloseTo(node.position.y + node.height / 2);
+        expect(configNode.position.y + configNode.height / 2).toBeCloseTo(node.position.y + node.height / 2);
+
+        expect(connections.map((connection) => [connection.fromNodeId, connection.toNodeId])).toEqual([
+            [node.id, configNode.id],
+            [textNode.id, configNode.id],
+        ]);
+        expect(new Set(connections.map((connection) => connection.id)).size).toBe(2);
+    });
+
+    it("配置节点是文本模式，并把视频节点与文本节点写进组装提示词", () => {
+        const node = videoNode();
+        const { textNode, configNode } = buildVideoReversePromptNodes(node, ["catalog-a"])!;
+
+        expect(configNode.metadata?.generationMode).toBe("text");
+        expect(configNode.metadata?.count).toBe(1);
+        expect(configNode.metadata?.composerContent).toContain(`@[node:${node.id}]`);
+        expect(configNode.metadata?.composerContent).toContain(`@[node:${textNode.id}]`);
+    });
+
+    it("文本节点预置视频反推提示词，覆盖动作与运动、镜头运动与时间标注", () => {
+        const { textNode } = buildVideoReversePromptNodes(videoNode(), ["catalog-a"])!;
+        const preset = textNode.metadata?.content || "";
+
+        expect(preset).toBe(textNode.metadata?.prompt);
+        expect(preset).toContain("视频");
+        expect(preset).toContain("动作与运动");
+        expect(preset).toContain("镜头运动");
+        // 抽帧是逐帧静态图，时间关系只能靠帧标注传达，提示词必须点出来
+        expect(preset).toContain("时间标注");
+        // 视频版不得复用图片版预设
+        expect(preset).not.toContain("AI 生图");
+    });
+
+    it("模型三级解析：目录候选优先，再回退配置文本模型、通用模型与默认文本模型", () => {
+        const fallbacks = ["config-text", "config-general", "default-text"];
+
+        // 第一级：目录候选（gpt-6-astra 在目录中时按既有候选顺序排在首位）
+        expect(buildVideoReversePromptNodes(videoNode(), ["catalog-a", "gpt-6-astra"], fallbacks)!.configNode.metadata?.model).toBe("gpt-6-astra");
+        expect(buildVideoReversePromptNodes(videoNode(), ["catalog-a"], fallbacks)!.configNode.metadata?.model).toBe("catalog-a");
+        // 目录为空（Key 未加载或该 Key 无文本模型）时逐级回退
+        expect(buildVideoReversePromptNodes(videoNode(), [], fallbacks)!.configNode.metadata?.model).toBe("config-text");
+        expect(buildVideoReversePromptNodes(videoNode(), [], ["", "config-general", "default-text"])!.configNode.metadata?.model).toBe("config-general");
+        expect(buildVideoReversePromptNodes(videoNode(), [], ["", undefined, "default-text"])!.configNode.metadata?.model).toBe("default-text");
+        // 全部缺失时留空，由请求阶段按候选序列继续处理
+        expect(buildVideoReversePromptNodes(videoNode(), [], [])!.configNode.metadata?.model).toBe("");
+    });
+
+    it("工具栏提供反推视频提示词的入口并接线到画布", () => {
+        const toolbar = readFileSync(resolve(process.cwd(), "src/components/canvas/canvas-node-hover-toolbar.tsx"), "utf8");
+        expect(toolbar).toContain("onReverseVideoPrompt");
+        const project = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
+        expect(project).toContain("onReverseVideoPrompt={createVideoReversePromptNodes}");
     });
 });
 
