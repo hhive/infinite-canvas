@@ -1,6 +1,7 @@
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 
+import i18n from "@/i18n";
 import { withLocalProxy } from "@/stores/use-config-store";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
@@ -8,7 +9,10 @@ export type UploadedFile = { url: string; storageKey: string; bytes: number; mim
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
 const objectUrls = new Map<string, string>();
 
-const MEDIA_RESPONSE_ERROR = "媒体地址返回的不是媒体内容";
+/** 该错误会经插件链路冒到界面，必须走 i18n；detail 只放 content-type 或 HTTP 状态码，不带 URL 与凭据。 */
+function mediaResponseError(detail: string) {
+    return new Error(i18n.t("apiErrors.mediaResponseInvalid", { detail }));
+}
 
 /**
  * 错误页与 JSON 错误体判定。
@@ -24,9 +28,9 @@ function isNonMediaContentType(contentType: string) {
 
 export async function fetchMediaBlob(url: string) {
     const response = await fetch(withLocalProxy(url));
-    if (!response.ok) throw new Error(`${MEDIA_RESPONSE_ERROR}（HTTP ${response.status}）`);
+    if (!response.ok) throw mediaResponseError(`HTTP ${response.status}`);
     const contentType = response.headers.get("content-type") || "";
-    if (isNonMediaContentType(contentType)) throw new Error(`${MEDIA_RESPONSE_ERROR}（${contentType}）`);
+    if (isNonMediaContentType(contentType)) throw mediaResponseError(contentType);
     return await response.blob();
 }
 
@@ -37,7 +41,7 @@ export async function fetchMediaBlob(url: string) {
  * 一旦如此，`uploadMediaFile` 的 Blob 分支就再也拦不住错误页了，所以改写之前必须先过这道闸。
  */
 export function assertMediaBlob(blob: Blob) {
-    if (isNonMediaContentType(blob.type)) throw new Error(`${MEDIA_RESPONSE_ERROR}（${blob.type}）`);
+    if (isNonMediaContentType(blob.type)) throw mediaResponseError(blob.type);
 }
 
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {

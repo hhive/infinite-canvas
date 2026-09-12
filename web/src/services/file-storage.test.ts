@@ -164,6 +164,11 @@ describe("媒体落盘前的响应类型校验", () => {
         expect(setItemMock).not.toHaveBeenCalled();
     });
 
+    it("视频：非媒体 blob 不得落盘（blob 分支没有 URL 可回退，更不能写坏本地缓存）", async () => {
+        await expect(storeGeneratedVideo({ blob: new Blob([HTML_ERROR_PAGE], { type: "text/html" }) })).rejects.toThrow();
+        expect(setItemMock).not.toHaveBeenCalled();
+    });
+
     it("音频：正常 audio/* 内容照常落盘", async () => {
         const stored = await storeGeneratedAudio(new Blob([new Uint8Array([1, 2, 3])], { type: "audio/mpeg" }), "mp3");
 

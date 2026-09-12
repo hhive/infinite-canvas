@@ -2548,7 +2548,9 @@ function InfiniteCanvasPage() {
                 setDialogNodeId(target.nodeId);
             } else {
                 const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                void (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
+                // 守卫误伤时不能让 rejection 无声无息：这里补 catch 走 toast。
+                void (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position))
+                    .catch((error) => message.error(error instanceof Error ? error.message : String(error)));
             }
 
             uploadTargetRef.current = null;
@@ -2564,7 +2566,8 @@ function InfiniteCanvasPage() {
             if (!file) return;
 
             const pos = screenToCanvas(event.clientX, event.clientY);
-            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
+            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos))
+                .catch((error) => message.error(error instanceof Error ? error.message : String(error)));
         },
         [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
     );
@@ -2853,7 +2856,14 @@ function InfiniteCanvasPage() {
                         const video = previewGeneratedVideo(result);
                         const videoSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                         setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, width: videoSize.width, height: videoSize.height, position: { x: node.position.x + node.width / 2 - videoSize.width / 2, y: node.position.y + node.height / 2 - videoSize.height / 2 }, metadata: { ...node.metadata, ...videoMetadata(video), prompt: effectivePrompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, videoMode: generationConfig.videoMode, references: generationReferenceUrls(generationContext) } } : node)));
-                        void storeGeneratedVideo(result).then((persisted) => setNodes((prev) => prev.map((node) => node.id === videoId ? { ...node, metadata: { ...node.metadata, ...videoMetadata(persisted) } } : node))).catch((error) => console.warn("[canvas:video] local persistence failed", { nodeId: videoId, error: error instanceof Error ? error.message : String(error) }));
+                        void storeGeneratedVideo(result)
+                            .then((persisted) => setNodes((prev) => prev.map((node) => node.id === videoId ? { ...node, metadata: { ...node.metadata, ...videoMetadata(persisted) } } : node)))
+                            .catch((error) => {
+                                console.warn("[canvas:video] local persistence failed", { nodeId: videoId, error: error instanceof Error ? error.message : String(error) });
+                                // 只写控制台用户看不到：此时节点播的是本地预览对象 URL，当场能播、刷新后才会黑屏，
+                                // 因此用 toast 提示即可，不把节点标成错误状态（那会让当前可播的节点显示为失败）。
+                                message.error(error instanceof Error ? error.message : String(error));
+                            });
                     } finally {
                         finishGenerationRequest(videoId, controller);
                     }
@@ -3132,7 +3142,13 @@ function InfiniteCanvasPage() {
                     const video = previewGeneratedVideo(result);
                     const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, width: videoSize.width, height: videoSize.height, position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 }, metadata: { ...item.metadata, ...videoMetadata(video), prompt, model: generationConfig.model, size: generationConfig.size, seconds: generationConfig.videoSeconds, vquality: generationConfig.vquality, generateAudio: generationConfig.videoGenerateAudio, watermark: generationConfig.videoWatermark, videoMode: generationConfig.videoMode } } : item)));
-                    void storeGeneratedVideo(result).then((persisted) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, ...videoMetadata(persisted) } } : item))).catch((error) => console.warn("[canvas:video] local persistence failed", { nodeId: node.id, error: error instanceof Error ? error.message : String(error) }));
+                    void storeGeneratedVideo(result)
+                        .then((persisted) => setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, ...videoMetadata(persisted) } } : item)))
+                        .catch((error) => {
+                            console.warn("[canvas:video] local persistence failed", { nodeId: node.id, error: error instanceof Error ? error.message : String(error) });
+                            // 同上一处：仅控制台可见等于用户无感知，补 toast 且不改变节点状态。
+                            message.error(error instanceof Error ? error.message : String(error));
+                        });
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {

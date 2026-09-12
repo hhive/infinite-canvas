@@ -5,7 +5,7 @@ import i18n from "@/i18n";
 import { dataUrlToFile, readFileAsDataUrl } from "@/lib/image-utils";
 import { clampVideoSeconds, computeVideoSize, inferVideoRatio } from "@/lib/media-size";
 import { boolConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/lib/seedance-video";
-import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
+import { assertMediaBlob, getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { runModelPlugin } from "@/services/api/model-plugin";
 import { buildApiUrl, modelOptionName, resolveModelChannel, resolveModelRequestConfig, resolveModelScript, withLocalProxy, type AiConfig } from "@/stores/use-config-store";
@@ -644,6 +644,9 @@ function statusMessage(status: number | undefined, fallback: string) {
 }
 
 async function assertVideoBlob(blob: Blob) {
+    // 与音频侧对称：错误页（text/html 等）必须在变成 result.blob 之前拦下。
+    // 到了 storeGeneratedVideo 的 blob 分支就没有 URL 可回退了，且会被永久写成本地缓存。
+    assertMediaBlob(blob);
     if (!blob.type.includes("json")) return;
     try {
         const payload = JSON.parse(await blob.text()) as { code?: number; msg?: string; error?: { message?: string } };
