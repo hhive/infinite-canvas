@@ -57,6 +57,11 @@ import { createCanvasNode } from "@/lib/canvas/canvas-node-factory";
 import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canUngroupSelectedNodes, collectGroupMemberNodes, getGroupWrapRect } from "@/lib/canvas/canvas-node-geometry";
 import { getNodeDefinition, isBuiltinNodeType, isBuiltinNodeType as isBuiltinType, useNodeRegistryVersion } from "@/lib/canvas/node-registry";
 import { buildTextModelAttempts, resolveTextModelCandidates, retryTextModelAttempts, type TextModelAttempt } from "@/lib/canvas/text-model-fallback";
+import { sampleVideoFrames, resolveFrameRate, DEFAULT_VIDEO_FRAME_MAX_EDGE, type SampledVideoFrame, type VideoFrameSamplingResult, type VideoFrameSamplingSummary } from "@/lib/canvas/video-frame-sampling";
+import { buildProductionBoardPrompt, parseProductionBoardAnalysis, ProductionBoardAnalysisError } from "@/lib/canvas/production-board-analysis";
+import { extractFrameFeatures, pickCharacterAngles, pickStoryboardFrames } from "@/lib/canvas/production-board-frames";
+import { renderProductionBoard } from "@/lib/canvas/production-board-render";
+import type { ProductionBoardAnalysis } from "@/lib/canvas/production-board-schema";
 import { ensureMediaAPIKeysLoaded, ensureMediaModelsLoaded, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
 // 反推节点的默认标题在模块级构造，拿不到 useTranslation 的 t，沿用组件层同样的 i18n 实例。
 import i18n from "@/i18n";
@@ -203,6 +208,154 @@ export function buildVideoReversePromptNodes(node: CanvasNodeData, textModels: r
             { id: nanoid(), fromNodeId: textNode.id, toNodeId: configNode.id },
         ],
     };
+}
+
+/** 制作规划板的画布尺寸（9:16）。 */
+export const PRODUCTION_BOARD_WIDTH = 1080;
+export const PRODUCTION_BOARD_HEIGHT = 1920;
+
+/**
+ * 故事板专用高清抽帧的长边。故事板格子里的帧就是最终画面，必须比文本链路用的常规抽帧清晰；
+ * 常规抽帧沿既有默认长边，否则几十张 1536 帧会把文本链路的输入 token 直接翻倍。
+ */
+export const PRODUCTION_BOARD_STORYBOARD_MAX_EDGE = 1536;
+export const PRODUCTION_BOARD_REFERENCE_MAX_EDGE = DEFAULT_VIDEO_FRAME_MAX_EDGE;
+
+/** 角色多视角与灯光参考各取几张；两者都从常规抽帧里挑，不需要额外的抽帧成本。 */
+export const PRODUCTION_BOARD_CHARACTER_COUNT = 3;
+export const PRODUCTION_BOARD_LIGHTING_COUNT = 3;
+/** 场景参考帧数量，取自高清抽帧，保证「环境与场景设计」一节的画面质量。 */
+export const PRODUCTION_BOARD_SCENE_COUNT = 2;
+
+/** 制作规划板图片节点的画布宽度；高度按 9:16 推导。 */
+const PRODUCTION_BOARD_NODE_WIDTH = 340;
+
+/** 一次生成的结果：解析后的分析结果与渲染好的板面 PNG。 */
+export type ProductionBoardRunResult = { analysis: ProductionBoardAnalysis; board: Blob };
+
+/** 文本链路的输入：提示词 + 常规抽帧 + 采样摘要（截断与否要如实告诉模型）。 */
+export type ProductionBoardAnalyzeInput = { prompt: string; frames: SampledVideoFrame[]; sampling: VideoFrameSamplingSummary };
+export type ProductionBoardAnalyze = (input: ProductionBoardAnalyzeInput) => Promise<string>;
+
+/** 抽帧与渲染是这条流程里仅有的两个副作用，抽成依赖便于测试打桩。 */
+export type ProductionBoardDeps = {
+    sampleFrames: typeof sampleVideoFrames;
+    renderBoard: typeof renderProductionBoard;
+};
+
+/** 读取失败时保留的模型原文；没有原文（例如抽帧失败）时为空串。 */
+export function readProductionBoardRawOutput(error: unknown): string {
+    return error instanceof ProductionBoardAnalysisError ? error.raw : "";
+}
+
+/**
+ * 制作规划板的流程编排：高清抽帧（故事板）→ 常规抽帧（角色/灯光参考与文本链路）→ 文本链路 →
+ * 解析 → 挑帧 → 渲染。只做编排，不碰画布、不弹提示；节点构造见 {@link buildProductionBoardNodes}。
+ *
+ * 返回 null 只表示前置条件不成立（视频节点为空），调用方据此提示；其余失败一律抛错，
+ * 不静默降级：解析失败抛 {@link ProductionBoardAnalysisError}，抽帧失败沿 sampleVideoFrames 的错误上抛。
+ */
+export async function runProductionBoard(input: {
+    videoUrl: string;
+    /** 常规抽帧速率（帧/秒），取自配置节点的 metadata.videoFrameRate。 */
+    frameRate?: number;
+    analyze: ProductionBoardAnalyze;
+    deps?: Partial<ProductionBoardDeps>;
+}): Promise<ProductionBoardRunResult | null> {
+    const videoUrl = input.videoUrl?.trim();
+    if (!videoUrl) return null;
+
+    const sampleFrames = input.deps?.sampleFrames ?? sampleVideoFrames;
+    const renderBoard = input.deps?.renderBoard ?? renderProductionBoard;
+
+    // 两次抽帧并发：高清帧只服务故事板画面，常规帧服务角色/灯光参考与文本链路。
+    // 抽帧失败直接抛错（sampleVideoFrames 一帧都解不出时自己就会抛），不降级成空帧板。
+    const [storyboardSampling, referenceSampling] = await Promise.all([
+        sampleFrames({ source: videoUrl, frameRate: input.frameRate, maxEdge: PRODUCTION_BOARD_STORYBOARD_MAX_EDGE }),
+        sampleFrames({ source: videoUrl, frameRate: input.frameRate, maxEdge: PRODUCTION_BOARD_REFERENCE_MAX_EDGE }),
+    ]);
+
+    const raw = await input.analyze({ prompt: buildProductionBoardPrompt(), frames: referenceSampling.frames, sampling: referenceSampling });
+
+    let analysis: ProductionBoardAnalysis;
+    try {
+        analysis = parseProductionBoardAnalysis(raw);
+    } catch (error) {
+        // 解析层自己就带原文，只有其他异常才在这里补一次包装：入口层「一定能读到本次模型输出」
+        // 这条口径不依赖解析层的实现细节。
+        throw error instanceof ProductionBoardAnalysisError ? error : new ProductionBoardAnalysisError(error instanceof Error ? error.message : "分析结果解析失败", raw);
+    }
+
+    // 角色多视角要求「角度差异最大」，需要先异步提取帧特征；提取失败的位置为 null，
+    // 挑选函数会降级为等间隔抽样，不会因此打断整块板。
+    const characterFeatures = await extractFrameFeatures(referenceSampling.frames);
+
+    const board = await renderBoard({
+        analysis,
+        // 挑不到帧的镜头保留 null 交给渲染层降级标注，入口层不替它决定画什么。
+        storyboardFrames: pickStoryboardFrames(analysis.storyboard, storyboardSampling.frames),
+        characterFrames: pickCharacterAngles(referenceSampling.frames, PRODUCTION_BOARD_CHARACTER_COUNT, characterFeatures),
+        lightingFrames: pickEvenlySpacedFrames(referenceSampling.frames, PRODUCTION_BOARD_LIGHTING_COUNT),
+        // 场景参考用高清帧：故事板帧跟着镜头时间点走，可能全挤在同一段时间上，覆盖不到整体环境。
+        sceneFrames: pickEvenlySpacedFrames(storyboardSampling.frames, PRODUCTION_BOARD_SCENE_COUNT),
+        width: PRODUCTION_BOARD_WIDTH,
+        height: PRODUCTION_BOARD_HEIGHT,
+    });
+
+    return { analysis, board };
+}
+
+/** 等间隔取少量帧：让明暗与环境变化都能被看到，而不是固定取开头几帧。 */
+function pickEvenlySpacedFrames(frames: SampledVideoFrame[], count: number) {
+    if (count <= 0) return [];
+    if (frames.length <= count) return [...frames];
+    const step = (frames.length - 1) / (count - 1 || 1);
+    return Array.from({ length: count }, (_, index) => frames[Math.round(index * step)]);
+}
+
+/** 制作规划表的产出：文本节点承载结构化 JSON（可编辑），图片节点承载渲染好的板面。 */
+export type ProductionBoardOutcome = { status: "success"; analysis: ProductionBoardAnalysis; image: UploadedImage } | { status: "failed"; raw: string; error: string };
+
+export type ProductionBoardPlan = {
+    textNode: CanvasNodeData;
+    /** 解析或渲染失败时为 null——失败路径绝不产出板面，只留原文供用户修正。 */
+    imageNode: CanvasNodeData | null;
+    connections: CanvasConnection[];
+};
+
+/**
+ * 制作规划表的节点构造，与 {@link buildVideoReversePromptNodes} 同为纯函数：不写画布、不弹提示。
+ * 文本节点放在视频节点右侧，图片节点接在文本节点之后，连线 `视频→文本`、`文本→图片`，
+ * 后者表达「改文本节点再重渲染」的来源关系。
+ *
+ * 视频节点为空或不是视频节点时返回 null；成功与失败走同一个构造，避免两处各写一遍排版。
+ */
+export function buildProductionBoardNodes(videoNode: CanvasNodeData, outcome: ProductionBoardOutcome): ProductionBoardPlan | null {
+    if (!canReversePromptFromVideoNode(videoNode)) return null;
+
+    const gap = 96;
+    const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+    const centerY = videoNode.position.y + videoNode.height / 2;
+    const content = outcome.status === "success" ? JSON.stringify(outcome.analysis, null, 2) : outcome.raw;
+    const textNode: CanvasNodeData = {
+        ...createCanvasNode(CanvasNodeType.Text, { x: videoNode.position.x + videoNode.width + gap + textSpec.width / 2, y: centerY }, { content, prompt: content, status: outcome.status === "success" ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: outcome.status === "failed" ? outcome.error : undefined, fontSize: 14 }),
+        title: i18n.t("canvas.projectPage.productionBoardTextTitle"),
+    };
+    const connections: CanvasConnection[] = [{ id: nanoid(), fromNodeId: videoNode.id, toNodeId: textNode.id }];
+    if (outcome.status === "failed") return { textNode, imageNode: null, connections };
+
+    const imageWidth = PRODUCTION_BOARD_NODE_WIDTH;
+    const imageHeight = Math.round((imageWidth * PRODUCTION_BOARD_HEIGHT) / PRODUCTION_BOARD_WIDTH);
+    const imageNode: CanvasNodeData = {
+        ...createCanvasNode(CanvasNodeType.Image, { x: 0, y: 0 }, imageMetadata(outcome.image)),
+        // 板面是 9:16，节点高度必须按节点宽度重算，不能沿用图片节点的默认尺寸。
+        position: { x: textNode.position.x + textNode.width + gap, y: Math.round(centerY - imageHeight / 2) },
+        width: imageWidth,
+        height: imageHeight,
+        title: i18n.t("canvas.projectPage.productionBoardImageTitle"),
+    };
+    connections.push({ id: nanoid(), fromNodeId: textNode.id, toNodeId: imageNode.id });
+    return { textNode, imageNode, connections };
 }
 
 function applyGeneratedVideo(item: CanvasNodeData, video: UploadedFile, extra: CanvasNodeData["metadata"] = {}): CanvasNodeData {
@@ -1967,6 +2120,82 @@ function InfiniteCanvasPage() {
         [effectiveConfig.model, effectiveConfig.textModel, message, t],
     );
 
+    /**
+     * 制作规划表入口：一次产出文本节点（结构化分析 JSON，可编辑）与图片节点（渲染好的 9:16 板面）。
+     *
+     * 文本链路复用既有的模型三级解析与失败自动切换（静默换模型、换 Key，不弹提示）；
+     * 解析失败、抽帧失败、渲染失败都是真失败，必须明确提示——静默原则只针对模型与 Key 的自动切换。
+     * 解析失败时把模型原文写进文本节点，用户看得见发生了什么，也能手工修正后重新渲染。
+     */
+    const createProductionBoardNodes = useCallback(
+        async (node: CanvasNodeData) => {
+            if (!canReversePromptFromVideoNode(node)) {
+                message.warning(t("canvas.projectPage.emptyProductionBoard"));
+                return;
+            }
+
+            setContextMenu(null);
+            const hide = message.loading(t("canvas.projectPage.productionBoardRunning"), 0);
+            try {
+                const frameRate = resolveFrameRate(node.metadata?.videoFrameRate);
+                const result = await runProductionBoard({
+                    videoUrl: node.metadata?.content || "",
+                    frameRate,
+                    analyze: async ({ prompt, frames, sampling }) => {
+                        // 视频节点上记的是视频模型，不能拿它当文本模型；这里整体回落到配置的文本模型。
+                        const generationConfig = buildGenerationConfig(effectiveConfig, undefined, "text");
+                        const textAttempts = await prepareCanvasTextAttempts(generationConfig.model);
+                        const messages = buildNodeResponseMessages({
+                            prompt,
+                            referenceImages: [],
+                            referenceVideos: [],
+                            referenceAudios: [],
+                            videoFrames: [{ videoId: node.id, frames, sampling }],
+                            videoFrameRate: frameRate,
+                            textCount: 0,
+                            imageCount: 0,
+                            videoCount: 0,
+                            audioCount: 0,
+                        });
+                        let streamed = "";
+                        return retryTextModelAttempts(textAttempts, async (target) => {
+                            const answer = await requestImageQuestion({ ...generationConfig, model: target.model }, messages, (text) => { streamed = text; }, { apiKeyId: target.apiKeyId });
+                            return answer || streamed;
+                        });
+                    },
+                });
+                if (!result) {
+                    message.warning(t("canvas.projectPage.emptyProductionBoard"));
+                    return;
+                }
+
+                const image = await uploadGeneratedImage(result.board);
+                const plan = buildProductionBoardNodes(node, { status: "success", analysis: result.analysis, image });
+                if (!plan) return;
+                setNodes((prev) => [...prev, plan.textNode, ...(plan.imageNode ? [plan.imageNode] : [])]);
+                setConnections((prev) => [...prev, ...plan.connections]);
+                setSelectedNodeIds(new Set([plan.imageNode ? plan.imageNode.id : plan.textNode.id]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(null);
+                message.success(t("canvas.projectPage.productionBoardDone"));
+            } catch (error) {
+                if (isGenerationCanceled(error)) return;
+                const errorDetails = error instanceof Error ? error.message : t("canvas.projectPage.generationFailed");
+                const plan = buildProductionBoardNodes(node, { status: "failed", raw: readProductionBoardRawOutput(error), error: errorDetails });
+                if (plan) {
+                    setNodes((prev) => [...prev, plan.textNode]);
+                    setConnections((prev) => [...prev, ...plan.connections]);
+                    setSelectedNodeIds(new Set([plan.textNode.id]));
+                    setDialogNodeId(null);
+                }
+                message.error(t("canvas.projectPage.productionBoardFailed", { reason: errorDetails }));
+            } finally {
+                hide();
+            }
+        },
+        [effectiveConfig, message, t],
+    );
+
     const cropImageNode = useCallback(async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
         if (!node.metadata?.content) return;
         const cropped = await cropDataUrl(node.metadata.content, crop);
@@ -3263,6 +3492,7 @@ function InfiniteCanvasPage() {
                     onViewImage={handleNodeViewImage}
                     onReversePrompt={createImageReversePromptNodes}
                     onReverseVideoPrompt={createVideoReversePromptNodes}
+                    onProductionBoard={createProductionBoardNodes}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}

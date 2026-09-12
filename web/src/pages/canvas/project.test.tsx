@@ -5,13 +5,34 @@ import { act, createElement, type ComponentProps, type ReactElement, type ReactN
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildCanvasTextAttempts, buildPluginBuiltinPrompt, buildVideoReversePromptNodes, canReversePromptFromVideoNode, CanvasTopBar, hasActiveCanvasMediaTask, prepareCanvasTextAttempts, resolveTextModelWriteback } from "@/pages/canvas/project";
+import { buildCanvasTextAttempts, buildPluginBuiltinPrompt, buildProductionBoardNodes, buildVideoReversePromptNodes, canReversePromptFromVideoNode, CanvasTopBar, hasActiveCanvasMediaTask, prepareCanvasTextAttempts, PRODUCTION_BOARD_REFERENCE_MAX_EDGE, PRODUCTION_BOARD_STORYBOARD_MAX_EDGE, readProductionBoardRawOutput, resolveTextModelWriteback, runProductionBoard, type ProductionBoardDeps } from "@/pages/canvas/project";
 import { retryTextModelAttempts, TextModelFallbackError } from "@/lib/canvas/text-model-fallback";
+import type { ProductionBoardAnalysis } from "@/lib/canvas/production-board-schema";
+import type { SampledVideoFrame, VideoFrameSamplingResult } from "@/lib/canvas/video-frame-sampling";
+import type { UploadedImage } from "@/services/image-storage";
 import type { MediaAPIKey } from "@/services/api/media-api-keys";
 import { useConfigStore } from "@/stores/use-config-store";
 import { resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
 
 const { fetchMediaAPIKeys, switchMediaAPIKey } = vi.hoisted(() => ({ fetchMediaAPIKeys: vi.fn(), switchMediaAPIKey: vi.fn() }));
+
+// 分析层与渲染层由另外的 Agent 实现，这里只按公开契约打桩：本文件关心的是入口编排，
+// 不能把上游模块的真实解析/绘制行为搅进来。
+const { buildProductionBoardPrompt, parseProductionBoardAnalysis } = vi.hoisted(() => ({ buildProductionBoardPrompt: vi.fn(() => "PRODUCTION_BOARD_PROMPT"), parseProductionBoardAnalysis: vi.fn() }));
+const { pickStoryboardFrames, pickCharacterAngles, extractFrameFeatures } = vi.hoisted(() => ({
+    pickStoryboardFrames: vi.fn(),
+    pickCharacterAngles: vi.fn<() => SampledVideoFrame[]>(),
+    extractFrameFeatures: vi.fn<() => Promise<(number[] | null)[]>>(),
+}));
+const { renderProductionBoard } = vi.hoisted(() => ({ renderProductionBoard: vi.fn() }));
+
+// 只替换提示词与解析两个函数，错误类保留真实实现：入口层要用它承载模型原文。
+vi.mock(import("@/lib/canvas/production-board-analysis"), async (importOriginal) => {
+    const actual = await importOriginal();
+    return { ...actual, buildProductionBoardPrompt, parseProductionBoardAnalysis };
+});
+vi.mock("@/lib/canvas/production-board-frames", () => ({ pickStoryboardFrames, pickCharacterAngles, extractFrameFeatures }));
+vi.mock("@/lib/canvas/production-board-render", () => ({ renderProductionBoard }));
 
 vi.mock(import("@/services/api/media-api-keys"), async (importOriginal) => {
     const actual = await importOriginal();
@@ -381,6 +402,194 @@ describe("视频反推提示词入口", () => {
         expect(toolbar).toContain("onReverseVideoPrompt");
         const project = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
         expect(project).toContain("onReverseVideoPrompt={createVideoReversePromptNodes}");
+    });
+});
+
+describe("制作规划表入口", () => {
+    function videoNode(overrides: Partial<CanvasNodeData> = {}): CanvasNodeData {
+        return {
+            id: "video-1",
+            type: CanvasNodeType.Video,
+            title: "视频",
+            position: { x: 100, y: 200 },
+            width: 320,
+            height: 180,
+            metadata: { content: "https://example.test/clip.mp4" },
+            ...overrides,
+        };
+    }
+
+    function frame(timestampMs: number): SampledVideoFrame {
+        return { dataUrl: `data:image/jpeg;base64,frame-${timestampMs}`, timestampMs };
+    }
+
+    function sampling(frames: SampledVideoFrame[]): VideoFrameSamplingResult {
+        return { frames, frameRate: 2, durationMs: 12_000, requestedCount: 24, frameCount: frames.length, truncated: false };
+    }
+
+    function uploadedImage(): UploadedImage {
+        return { url: "https://example.test/board.png", storageKey: "board.png", width: 1080, height: 1920, bytes: 4096, mimeType: "image/png" };
+    }
+
+    function analysis(): ProductionBoardAnalysis {
+        return {
+            title: "夜航",
+            logline: "一条夜航货轮上的工人。",
+            shared: { shotCount: 8, palette: [{ name: "钴蓝", hex: "#1B2A4A" }], environment: "港口", notes: "写实" },
+            characters: [{ name: "老周", appearance: "瘦高", costume: "橙色工装", consistency: "全程同一件工装" }],
+            environment: { location: "货轮甲板", description: "湿滑钢板", cameraMoves: [{ order: 1, position: "左舷", shotType: "中景", movement: "静态" }] },
+            storyboard: [{ index: 1, timeSec: 0.5, cameraType: "写实", shotSize: "中景", movement: "静态", action: "工人抬头" }],
+            lighting: [{ name: "钠灯", timeOfDay: "夜晚", quality: "硬光", note: "暖橙" }],
+            moodKeywords: ["潮湿", "孤寂"],
+            audio: { ambient: "引擎低鸣", music: "无", tone: "低落" },
+            cinematography: "手持长镜头",
+        };
+    }
+
+    /** 默认桩：解析成功、故事板每格都有对应帧、渲染返回一个稳定的 Blob。 */
+    beforeEach(() => {
+        buildProductionBoardPrompt.mockReturnValue("PRODUCTION_BOARD_PROMPT");
+        parseProductionBoardAnalysis.mockReset();
+        parseProductionBoardAnalysis.mockReturnValue(analysis());
+        pickStoryboardFrames.mockReset();
+        pickStoryboardFrames.mockImplementation((shots: unknown[], frames: SampledVideoFrame[]) => shots.map((_, index) => frames[index] ?? null));
+        pickCharacterAngles.mockReset();
+        pickCharacterAngles.mockReturnValue([frame(1000)]);
+        extractFrameFeatures.mockReset();
+        extractFrameFeatures.mockResolvedValue([null]);
+        renderProductionBoard.mockReset();
+        renderProductionBoard.mockResolvedValue(new Blob(["board"], { type: "image/png" }));
+    });
+
+    type ProductionBoardRunInput = Parameters<typeof runProductionBoard>[0];
+
+    function runWith(overrides: Partial<ProductionBoardRunInput> = {}) {
+        const sampleFrames = vi.fn(async (input: { maxEdge?: number }) => sampling(input.maxEdge === PRODUCTION_BOARD_STORYBOARD_MAX_EDGE ? [frame(0), frame(6000)] : [frame(1000), frame(5000)]));
+        const renderBoard = vi.fn<ProductionBoardDeps["renderBoard"]>(async () => new Blob(["board"], { type: "image/png" }));
+        const analyze = vi.fn(async () => "模型原文");
+        const input: ProductionBoardRunInput = { videoUrl: "https://example.test/clip.mp4", analyze, deps: { sampleFrames, renderBoard }, ...overrides };
+        return { input, sampleFrames, renderBoard, analyze };
+    }
+
+    it("视频节点为空时不启动流程，也不抽帧、不请求模型", async () => {
+        const { input, sampleFrames, renderBoard, analyze } = runWith({ videoUrl: "   " });
+
+        await expect(runProductionBoard(input)).resolves.toBeNull();
+        expect(sampleFrames).not.toHaveBeenCalled();
+        expect(analyze).not.toHaveBeenCalled();
+        expect(renderBoard).not.toHaveBeenCalled();
+    });
+
+    it("高清抽帧与常规抽帧使用不同的长边，只有常规抽帧进文本链路", async () => {
+        const { input, sampleFrames, analyze, renderBoard } = runWith();
+
+        await runProductionBoard(input);
+
+        expect(sampleFrames).toHaveBeenCalledTimes(2);
+        // 故事板要画面质量走 1536 长边；常规抽帧走既有默认，两者必须区分，否则要么故事板糊、要么文本 token 翻倍。
+        expect(sampleFrames.mock.calls.map((call) => call[0].maxEdge)).toEqual([PRODUCTION_BOARD_STORYBOARD_MAX_EDGE, PRODUCTION_BOARD_REFERENCE_MAX_EDGE]);
+        expect(PRODUCTION_BOARD_STORYBOARD_MAX_EDGE).not.toBe(PRODUCTION_BOARD_REFERENCE_MAX_EDGE);
+        expect(analyze).toHaveBeenCalledWith(expect.objectContaining({ prompt: "PRODUCTION_BOARD_PROMPT", frames: [frame(1000), frame(5000)] }));
+        // 故事板这一格的时间点是 0.5 秒，命中的只能是高清抽帧里的 frame(0)，不可能是常规抽帧的帧
+        expect(renderBoard.mock.calls[0][0].storyboardFrames).toEqual([frame(0)]);
+        // 角色视角差异要靠帧特征，特征也必须取自与角色参考同一批常规抽帧
+        expect(extractFrameFeatures).toHaveBeenCalledWith([frame(1000), frame(5000)]);
+    });
+
+    it("解析失败时抛错并保留模型原文，且不进入渲染层", async () => {
+        const { input, renderBoard } = runWith();
+        parseProductionBoardAnalysis.mockImplementation(() => {
+            throw new Error("缺少 storyboard 字段");
+        });
+
+        const error = await runProductionBoard(input).catch((reason: unknown) => reason);
+
+        expect(error).toBeInstanceOf(Error);
+        expect(readProductionBoardRawOutput(error)).toBe("模型原文");
+        expect((error as Error).message).toContain("缺少 storyboard 字段");
+        // 解析失败不能拿默认值硬凑一张板
+        expect(renderBoard).not.toHaveBeenCalled();
+    });
+
+    it("没有可用原文时读取原文返回空串，不误报为模型输出", () => {
+        expect(readProductionBoardRawOutput(new Error("抽帧失败"))).toBe("");
+        expect(readProductionBoardRawOutput(undefined)).toBe("");
+    });
+
+    it("抽帧失败直接向上抛错，不用空帧渲染出一张空板", async () => {
+        const { input, renderBoard } = runWith({ deps: { sampleFrames: vi.fn(async () => { throw new Error("未能从视频中解出任何帧，视频可能为空或不可解码"); }), renderBoard: vi.fn() } });
+
+        await expect(runProductionBoard(input)).rejects.toThrow("未能从视频中解出任何帧");
+        expect(renderBoard).not.toHaveBeenCalled();
+    });
+
+    it("挑不到帧的镜头把 null 原样交给渲染层降级，由渲染层决定画什么", async () => {
+        const { input, renderBoard } = runWith();
+        pickStoryboardFrames.mockReturnValue([null, frame(0)]);
+
+        await runProductionBoard(input);
+
+        expect(renderBoard.mock.calls[0][0].storyboardFrames).toEqual([null, frame(0)]);
+    });
+
+    it("成功路径返回解析结果与渲染好的板面", async () => {
+        const { input } = runWith();
+
+        const result = await runProductionBoard(input);
+
+        expect(result?.analysis.title).toBe("夜航");
+        expect(result?.board).toBeInstanceOf(Blob);
+    });
+
+    it("成功路径同时产出文本节点与图片节点，并连出视频→文本、文本→图片两条连线", () => {
+        const node = videoNode();
+        const plan = buildProductionBoardNodes(node, { status: "success", analysis: analysis(), image: uploadedImage() });
+        expect(plan).not.toBeNull();
+        const { textNode, imageNode, connections } = plan!;
+
+        expect(textNode.type).toBe(CanvasNodeType.Text);
+        expect(textNode.metadata?.status).toBe("success");
+        // 文本节点承载可编辑的结构化 JSON
+        expect(JSON.parse(textNode.metadata?.content || "")).toMatchObject({ title: "夜航", moodKeywords: ["潮湿", "孤寂"] });
+
+        expect(imageNode?.type).toBe(CanvasNodeType.Image);
+        expect(imageNode?.metadata?.content).toBe("https://example.test/board.png");
+        expect(imageNode?.metadata?.naturalWidth).toBe(1080);
+        expect(imageNode?.metadata?.naturalHeight).toBe(1920);
+
+        // 排在视频节点右侧、依次向右
+        expect(textNode.position.x).toBeGreaterThan(node.position.x + node.width);
+        expect(imageNode!.position.x).toBeGreaterThan(textNode.position.x + textNode.width);
+        expect(connections.map((connection) => [connection.fromNodeId, connection.toNodeId])).toEqual([
+            [node.id, textNode.id],
+            [textNode.id, imageNode!.id],
+        ]);
+        expect(new Set(connections.map((connection) => connection.id)).size).toBe(2);
+    });
+
+    it("失败路径只产出承载模型原文的文本节点，不产出图片节点", () => {
+        const plan = buildProductionBoardNodes(videoNode(), { status: "failed", raw: "模型原文不是 JSON", error: "分析结果解析失败" });
+        expect(plan).not.toBeNull();
+
+        expect(plan!.imageNode).toBeNull();
+        expect(plan!.textNode.type).toBe(CanvasNodeType.Text);
+        expect(plan!.textNode.metadata?.status).toBe("error");
+        expect(plan!.textNode.metadata?.content).toBe("模型原文不是 JSON");
+        expect(plan!.textNode.metadata?.errorDetails).toBe("分析结果解析失败");
+        // 没有图片节点时不该留下指向空节点的连线
+        expect(plan!.connections.map((connection) => connection.toNodeId)).toEqual([plan!.textNode.id]);
+    });
+
+    it("空视频节点不构造任何节点", () => {
+        expect(buildProductionBoardNodes(videoNode({ metadata: {} }), { status: "failed", raw: "", error: "x" })).toBeNull();
+        expect(buildProductionBoardNodes(videoNode({ id: "image-1", type: CanvasNodeType.Image }), { status: "failed", raw: "", error: "x" })).toBeNull();
+    });
+
+    it("工具栏提供生成制作规划表的入口并接线到画布", () => {
+        const toolbar = readFileSync(resolve(process.cwd(), "src/components/canvas/canvas-node-hover-toolbar.tsx"), "utf8");
+        expect(toolbar).toContain("onProductionBoard");
+        const project = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
+        expect(project).toContain("onProductionBoard={createProductionBoardNodes}");
     });
 });
 
