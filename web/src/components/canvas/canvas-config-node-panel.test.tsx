@@ -36,6 +36,7 @@ vi.mock("@/stores/use-theme-store", () => ({
 }));
 
 import { CanvasConfigNodePanel } from "@/components/canvas/canvas-config-node-panel";
+import { NODE_DEFAULT_SIZE, NODE_SPECS } from "@/constant/canvas";
 import { DEFAULT_VIDEO_REVERSE_FRAME_RATE } from "@/lib/canvas/video-frame-sampling-plan";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import "@/i18n";
@@ -100,5 +101,36 @@ describe("配置节点文本模式下的抽帧速率", () => {
         act(() => (textSettingsProps.current?.onFrameRateChange as (rate: number) => void)(4));
 
         expect(onConfigChange).toHaveBeenCalledWith("config-1", { videoFrameRate: 4 });
+    });
+});
+
+describe("配置节点面板布局", () => {
+    // 节点内容层带 overflow-hidden 且高度取节点自身像素高度，面板比节点高时只会从底部裁掉最后一个子元素。
+    // 生成按钮正是最后一个子元素，历史上因此只露出上半截。
+    it("控件区独立滚动，生成按钮在滚动区之外且不被压缩", () => {
+        renderPanel(configNode());
+        const root = container.firstElementChild as HTMLElement;
+        expect(root.className).toContain("flex-col");
+
+        const scrollRegion = root.querySelector<HTMLElement>(":scope > .overflow-y-auto");
+        expect(scrollRegion, "面板需要一层可滚动的控件区").not.toBeNull();
+        expect(scrollRegion!.className).toContain("min-h-0");
+        expect(scrollRegion!.className).toContain("flex-1");
+        expect(scrollRegion!.textContent).toContain("生成配置");
+        expect(scrollRegion!.textContent).toContain("组装提示词");
+
+        const button = [...root.querySelectorAll("button")].find((item) => item.textContent?.includes("开始生成"));
+        expect(button, "未找到开始生成按钮").toBeDefined();
+        expect(scrollRegion!.contains(button!)).toBe(false);
+        expect(button!.parentElement).toBe(root);
+        expect(button!.previousElementSibling).toBe(scrollRegion);
+        expect(button!.className).toContain("shrink-0");
+    });
+
+    // 默认高度按中文面板估算：顶部内边距 28 + 标题行 24 + 标签两行 62 + API Key 选择 32
+    // + 模型行 40 + 按钮 36 + 底部内边距 12 + 上下边框 4 + 四处间距 32，合计约 270。
+    it("默认高度能容纳中文面板内容，新建节点无需内部滚动", () => {
+        expect(NODE_DEFAULT_SIZE[CanvasNodeType.Config].height).toBe(NODE_SPECS[CanvasNodeType.Config].height);
+        expect(NODE_SPECS[CanvasNodeType.Config].height).toBeGreaterThanOrEqual(280);
     });
 });
