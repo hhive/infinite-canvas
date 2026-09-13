@@ -5,7 +5,7 @@ import { act, createElement, type ComponentProps, type ReactElement, type ReactN
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildCanvasTextAttempts, buildPluginBuiltinPrompt, buildProductionBoardImageNodes, buildProductionBoardNodes, buildRetriedProductionBoardNode, buildVideoReversePromptNodes, canReversePromptFromVideoNode, CanvasTopBar, findProductionBoardSourceNodes, hasActiveCanvasMediaTask, prepareCanvasTextAttempts, renderProductionBoardFromText, resolveTextModelWriteback, shouldRenderProductionBoardOnRetry, type ProductionBoardDeps } from "@/pages/canvas/project";
+import { buildCanvasTextAttempts, buildPluginBuiltinPrompt, buildProductionBoardImageNodes, buildProductionBoardNodes, buildProductionBoardVideoNodes, buildProductionBoardVideoPromptConnection, buildProductionBoardVideoPromptNode, buildRetriedProductionBoardNode, buildVideoReversePromptNodes, canReversePromptFromVideoNode, CanvasTopBar, findProductionBoardBoardNode, findProductionBoardSourceNodes, hasActiveCanvasMediaTask, prepareCanvasTextAttempts, renderProductionBoardFromText, resolveTextModelWriteback, shouldRenderProductionBoardOnRetry, type ProductionBoardDeps } from "@/pages/canvas/project";
 import { retryTextModelAttempts, TextModelFallbackError } from "@/lib/canvas/text-model-fallback";
 import type { ProductionBoardAnalysis } from "@/lib/canvas/production-board-schema";
 import { resolveFrameRate, type SampledVideoFrame, type VideoFrameSamplingResult } from "@/lib/canvas/video-frame-sampling";
@@ -657,9 +657,92 @@ describe("制作规划表入口", () => {
         const source = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
 
         expect(source).toContain('sourceNode?.metadata?.productionBoardRole === "config"');
-        expect(source).toContain("renderProductionBoardBoard({ ...rootNode");
+        expect(source).toContain("renderProductionBoardBoard(analysisNode)");
         // 分析文本节点也要带上标记，工具栏的重渲染入口才找得到它
         expect(source).toContain('productionBoardRole: "analysis" as const');
+    });
+
+    it("反推提示词是独立的一次调用，排在板面分析之前，且共用同一批抽帧", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
+        const reverseCall = source.indexOf("VIDEO_PROMPT_REVERSE_PRESET");
+        const boardCall = source.indexOf("buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt })");
+
+        // 两次调用：反推提示词在前，板面分析在后
+        expect(reverseCall).toBeGreaterThanOrEqual(0);
+        expect(boardCall).toBeGreaterThan(reverseCall);
+        // 只换任务说明，不重新抽帧：两次调用复用同一份 generationContext
+        expect(source.slice(reverseCall, boardCall)).toContain("buildNodeResponseMessages({ ...generationContext, prompt: VIDEO_PROMPT_REVERSE_PRESET })");
+    });
+
+    it("反推提示词失败只告警，不阻断板面分析", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
+        const block = source.slice(source.indexOf("if (isProductionBoardConfig) {"), source.indexOf("const textMessages = buildNodeResponseMessages"));
+
+        expect(block).toContain("productionBoardReversePromptFailed");
+        // 取消要照常冒泡，否则停止生成会卡在阶段条上
+        expect(block).toContain("isGenerationCanceled(error)) throw error");
+        // 失败仅清空文本，不 return：板面才是主产物
+        expect(block).not.toContain("return;");
+    });
+
+    it("反推提示词节点建在分析节点正下方，不与右侧的规划板图片节点重叠", () => {
+        const analysisNode = textNode();
+        const promptNode = buildProductionBoardVideoPromptNode(analysisNode, "低角度手持，沿田埂向前推进。");
+
+        expect(promptNode.type).toBe(CanvasNodeType.Text);
+        expect(promptNode.metadata?.productionBoardRole).toBe("videoPrompt");
+        expect(promptNode.metadata?.content).toBe("低角度手持，沿田埂向前推进。");
+        expect(promptNode.position.x).toBe(analysisNode.position.x);
+        expect(promptNode.position.y).toBeGreaterThanOrEqual(analysisNode.position.y + analysisNode.height);
+    });
+
+    it("反推提示词节点连线自分析节点，作为查找规划板图片节点的上游依据", () => {
+        const analysisNode = textNode();
+        const promptNode = buildProductionBoardVideoPromptNode(analysisNode, "一段提示词");
+        const connection = buildProductionBoardVideoPromptConnection(analysisNode, promptNode);
+
+        expect([connection.fromNodeId, connection.toNodeId]).toEqual([analysisNode.id, promptNode.id]);
+    });
+
+    it("「用此提示词生成视频」只建视频配置节点，绝不发起生成", () => {
+        const promptNode = buildProductionBoardVideoPromptNode(textNode(), "一段提示词");
+        const boardNode = { id: "image-1", type: CanvasNodeType.Image, title: "制作规划表", position: { x: 1300, y: 220 }, width: 340, height: 604, metadata: { productionBoardRole: "board" as const } };
+        const { configNode, connections } = buildProductionBoardVideoNodes(promptNode, boardNode);
+
+        expect(configNode.type).toBe(CanvasNodeType.Config);
+        // 配置节点 spec 默认是 image，这里必须显式写成 video，否则会按生图跑
+        expect(configNode.metadata?.generationMode).toBe("video");
+        // composerContent 留空，走「汇总全部上游资源」的分支：提示词进 prompt、规划板进参考图
+        expect(configNode.metadata?.composerContent).toBeUndefined();
+        expect(connections.map((item) => [item.fromNodeId, item.toNodeId])).toEqual([
+            [promptNode.id, configNode.id],
+            [boardNode.id, configNode.id],
+        ]);
+    });
+
+    it("规划板还没渲染出来时只连提示词节点，不报错", () => {
+        const promptNode = buildProductionBoardVideoPromptNode(textNode(), "一段提示词");
+        const { configNode, connections } = buildProductionBoardVideoNodes(promptNode, null);
+
+        expect(connections.map((item) => [item.fromNodeId, item.toNodeId])).toEqual([[promptNode.id, configNode.id]]);
+    });
+
+    it("沿提示词节点入边找分析节点、再由分析节点出边找 board 节点", () => {
+        const analysisNode = textNode();
+        const promptNode = buildProductionBoardVideoPromptNode(analysisNode, "一段提示词");
+        const boardNode = { id: "image-1", type: CanvasNodeType.Image, title: "制作规划表", position: { x: 1300, y: 220 }, width: 340, height: 604, metadata: { productionBoardRole: "board" as const } };
+        const otherBoard: CanvasNodeData = { ...boardNode, id: "image-2" };
+        const connections: CanvasConnection[] = [
+            { id: "c1", fromNodeId: analysisNode.id, toNodeId: promptNode.id },
+            { id: "c2", fromNodeId: analysisNode.id, toNodeId: boardNode.id },
+        ];
+        const nodes = [analysisNode, promptNode, boardNode, otherBoard];
+
+        expect(findProductionBoardBoardNode(promptNode.id, nodes, connections)?.id).toBe(boardNode.id);
+        // 没连到分析节点时找不到，不该退化成「随便挑一张板图」
+        expect(findProductionBoardBoardNode(promptNode.id, nodes, [])).toBeNull();
+        // 别人家的规划板不会被误当成这一组的
+        expect(findProductionBoardBoardNode(promptNode.id, nodes, connections)).not.toBe(otherBoard);
     });
 
     it("工具栏提供生成制作规划表与渲染规划板两个入口并接线到画布", () => {

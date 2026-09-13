@@ -46,6 +46,7 @@ import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "@/componen
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { CanvasSidePanel } from "@/components/canvas/canvas-side-panel";
+import { CanvasStageProgress, type CanvasStage } from "@/components/canvas/canvas-stage-progress";
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { useAgentStore } from "@/stores/use-agent-store";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -407,7 +408,9 @@ export function buildProductionBoardImageNodes(analysisNode: CanvasNodeData, ima
     const height = Math.round((width * PRODUCTION_BOARD_HEIGHT) / PRODUCTION_BOARD_WIDTH);
     const centerY = analysisNode.position.y + analysisNode.height / 2;
     const imageNode: CanvasNodeData = {
-        ...createCanvasNode(CanvasNodeType.Image, { x: 0, y: 0 }, imageMetadata(image)),
+        // 标记成 board：反推提示词节点的「生成视频」入口要靠它在画布上找到这张规划板当参考图，
+        // 不去猜标题或提示词文本。
+        ...createCanvasNode(CanvasNodeType.Image, { x: 0, y: 0 }, { ...imageMetadata(image), productionBoardRole: "board" as const }),
         // 板面是 9:16，节点高度必须按节点宽度重算，不能沿用图片节点的默认尺寸。
         position: { x: analysisNode.position.x + analysisNode.width + gap, y: Math.round(centerY - height / 2) },
         width,
@@ -415,6 +418,74 @@ export function buildProductionBoardImageNodes(analysisNode: CanvasNodeData, ima
         title: i18n.t("canvas.projectPage.productionBoardImageTitle"),
     };
     return { imageNode, connection: { id: nanoid(), fromNodeId: analysisNode.id, toNodeId: imageNode.id } };
+}
+
+/**
+ * 反推视频提示词节点的构造：放在分析节点正下方，而不是右侧——
+ * 右侧已经被规划板图片节点占用，同高会重叠。
+ * 位置参数按 createCanvasNode 的中心坐标口径传入。
+ */
+export function buildProductionBoardVideoPromptNode(analysisNode: CanvasNodeData, videoPrompt: string): CanvasNodeData {
+    const gap = 96;
+    const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+    return {
+        ...createCanvasNode(
+            CanvasNodeType.Text,
+            {
+                x: analysisNode.position.x + textSpec.width / 2,
+                y: analysisNode.position.y + analysisNode.height + gap + textSpec.height / 2,
+            },
+            { content: videoPrompt, prompt: videoPrompt, status: NODE_STATUS_SUCCESS, fontSize: 14, productionBoardRole: "videoPrompt" },
+        ),
+        title: i18n.t("canvas.projectPage.productionBoardVideoPromptTitle"),
+    };
+}
+
+/** 分析节点 → 反推提示词节点的连线：既是画布上的从属关系，也是查找规划板图片节点的起点。 */
+export function buildProductionBoardVideoPromptConnection(analysisNode: CanvasNodeData, promptNode: CanvasNodeData): CanvasConnection {
+    return { id: nanoid(), fromNodeId: analysisNode.id, toNodeId: promptNode.id };
+}
+
+/** 「用此提示词生成视频」要建的视频配置节点：只建节点，绝不在这里发起付费生成。 */
+export type ProductionBoardVideoPlan = { configNode: CanvasNodeData; connections: CanvasConnection[] };
+
+/**
+ * 沿着反推提示词节点往上游找它对应的规划板图片节点，让它作为参考图进入视频生成。
+ *
+ * 先由入边找到分析节点，再由分析节点的出边找 board 角色节点——两步都按 metadata 标记与连线走，
+ * 不去猜标题或提示词文本。规划板还没渲染出来时返回 null，调用方只连提示词节点即可。
+ */
+export function findProductionBoardBoardNode(promptNodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): CanvasNodeData | null {
+    const analysisIds = new Set(connections.filter((connection) => connection.toNodeId === promptNodeId).map((connection) => connection.fromNodeId));
+    if (!analysisIds.size) return null;
+    const boardIds = new Set(connections.filter((connection) => analysisIds.has(connection.fromNodeId)).map((connection) => connection.toNodeId));
+    return nodes.find((node) => boardIds.has(node.id) && node.metadata?.productionBoardRole === "board") ?? null;
+}
+
+/**
+ * 按反推提示词建视频配置节点，并把它与制作规划板一起接进配置节点的上游。
+ *
+ * composerContent 故意留空：空值时生成链路会汇总全部上游资源——提示词节点的文字拼进 prompt，
+ * 规划板图片进参考素材。这与既有 generateImageFromTextNode 走的是同一条分支。
+ * 规划板图片节点不存在（比如用户删了）时只连提示词节点，不报错：提示词本身仍可独立使用。
+ */
+export function buildProductionBoardVideoNodes(promptNode: CanvasNodeData, boardNode: CanvasNodeData | null): ProductionBoardVideoPlan {
+    const gap = 96;
+    const configSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
+    const configNode: CanvasNodeData = {
+        ...createCanvasNode(
+            CanvasNodeType.Config,
+            {
+                x: promptNode.position.x + promptNode.width + gap + configSpec.width / 2,
+                y: promptNode.position.y + promptNode.height / 2,
+            },
+            { generationMode: "video", model: "", count: 1 },
+        ),
+        title: i18n.t("canvas.projectPage.productionBoardVideoConfigTitle"),
+    };
+    const connections: CanvasConnection[] = [{ id: nanoid(), fromNodeId: promptNode.id, toNodeId: configNode.id }];
+    if (boardNode) connections.push({ id: nanoid(), fromNodeId: boardNode.id, toNodeId: configNode.id });
+    return { configNode, connections };
 }
 
 function applyGeneratedVideo(item: CanvasNodeData, video: UploadedFile, extra: CanvasNodeData["metadata"] = {}): CanvasNodeData {
@@ -514,6 +585,8 @@ function InfiniteCanvasPage() {
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
     const [nodeCreatePosition, setNodeCreatePosition] = useState<Position | null>(null);
     const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
+    // 制作规划表链路要跑两次模型调用再渲染，进度只体现在节点自己的 loading 上看不出来，因此单独记阶段。
+    const [productionBoardStage, setProductionBoardStage] = useState<CanvasStage | null>(null);
     const [isMiniMapOpen, setIsMiniMapOpen] = useState(false);
     const [backgroundMode, setBackgroundMode] = useState<CanvasBackgroundMode>("lines");
     const [showImageInfo, setShowImageInfo] = useState(false);
@@ -2652,6 +2725,8 @@ function InfiniteCanvasPage() {
                 return;
             }
             let pendingChildIds: string[] = [];
+            // 制作规划表链路要跨越 try/catch/finally，阶段条必须在 finally 里可靠收尾，所以记在 try 外。
+            let productionBoardRun = false;
             if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: statusPrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
 
             try {
@@ -2943,6 +3018,30 @@ function InfiniteCanvasPage() {
                 // 失败后，再按请求维度（X-Media-Api-Key-Id 请求头）换其他 Key，不弹提示、不改全局会话 Key。
                 // 先 await 加载 Key 列表，否则未加载的 store 会让 Key 维度整条失效。
                 const textAttempts = await prepareCanvasTextAttempts(generationConfig.model);
+
+                // 制作规划表的第一次调用：反推视频提示词。
+                //
+                // 与板面分析刻意分成两次调用：两者任务说明完全不同（一个要一段可直接生成视频的提示词，
+                // 一个要严格结构的 JSON），塞进同一次调用会让模型两头都写不好。
+                // 两次调用共用同一批抽帧，所以这里只是把任务说明换掉，不额外抽帧。
+                // 它失败不阻断板面——板面才是主产物，所以只告警、继续走下面的分析。
+                let productionBoardReversePrompt = "";
+                if (isProductionBoardConfig) {
+                    productionBoardRun = true;
+                    setProductionBoardStage("reversePrompt");
+                    try {
+                        const reverseMessages = buildNodeResponseMessages({ ...generationContext, prompt: VIDEO_PROMPT_REVERSE_PRESET });
+                        productionBoardReversePrompt = await retryTextModelAttempts(textAttempts, async (target) =>
+                            requestImageQuestion({ ...generationConfig, model: target.model }, reverseMessages, () => {}, { signal: controller.signal, apiKeyId: target.apiKeyId }),
+                        );
+                    } catch (error) {
+                        // 取消要照常向上冒泡，让外层的取消分支收尾；其余失败只记为空串，继续出板。
+                        if (isGenerationCanceled(error)) throw error;
+                        message.warning(t("canvas.projectPage.productionBoardReversePromptFailed", { reason: error instanceof Error ? error.message : t("canvas.projectPage.generationFailed") }));
+                    }
+                    setProductionBoardStage("board");
+                }
+
                 const textMessages = buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt });
                 const results = await Promise.all(
                     textIds.map(async (textId): Promise<CanvasNodeText | null> => {
@@ -3033,7 +3132,20 @@ function InfiniteCanvasPage() {
                 // 渲染不调用模型，解析失败也只提示、不建图片节点，原文本来就在文本节点里。
                 if (isProductionBoardConfig) {
                     const boardText = completedTexts.find((text) => text.id === rootNode.metadata?.primaryTextId) || firstText;
-                    if (boardText?.content) void renderProductionBoardBoard({ ...rootNode, metadata: { ...rootNode.metadata, content: boardText.content } });
+                    const analysisNode: CanvasNodeData = { ...rootNode, metadata: { ...rootNode.metadata, content: boardText?.content || "" } };
+
+                    // 反推提示词节点挂在分析节点正下方：两者同一次生成、同源输入，画布上也应当是一组。
+                    // 反推那步失败时这里是空串，不建节点——上面已经就失败原因告过警，不重复打扰。
+                    if (productionBoardReversePrompt.trim()) {
+                        const promptNode = buildProductionBoardVideoPromptNode(analysisNode, productionBoardReversePrompt.trim());
+                        setNodes((prev) => [...prev, promptNode]);
+                        setConnections((prev) => [...prev, buildProductionBoardVideoPromptConnection(analysisNode, promptNode)]);
+                    }
+
+                    // 两次模型调用到此结束，阶段条交还给渲染自己的「正在渲染制作规划表…」提示。
+                    productionBoardRun = false;
+                    setProductionBoardStage(null);
+                    if (boardText?.content) void renderProductionBoardBoard(analysisNode);
                 }
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
@@ -3057,6 +3169,8 @@ function InfiniteCanvasPage() {
                     ),
                 );
             } finally {
+                // 中途抛错时阶段条会停在原地，这里兜底收尾；正常路径已在后置钩子里清掉。
+                if (productionBoardRun) setProductionBoardStage(null);
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
             }
@@ -3253,6 +3367,34 @@ function InfiniteCanvasPage() {
             setDialogNodeId(configNode.id);
         },
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, message],
+    );
+
+    /**
+     * 反推提示词节点的「用此提示词生成视频」：只建一个视频配置节点，不建视频节点、不发起生成。
+     *
+     * 与 generateImageFromTextNode 同一套路——生成是付费动作，入口只负责把节点与连线摆好，
+     * 模型、Key、时长、分辨率都留给用户在配置节点面板上决定。
+     */
+    const generateVideoFromProductionBoardPrompt = useCallback(
+        (node: CanvasNodeData) => {
+            const prompt = (node.metadata?.content || node.metadata?.prompt || "").trim();
+            if (!prompt) {
+                message.warning(t("canvas.projectPage.productionBoardEmptyText"));
+                return;
+            }
+            const boardNode = findProductionBoardBoardNode(node.id, nodesRef.current, connectionsRef.current);
+            const plan = buildProductionBoardVideoNodes(node, boardNode);
+            const nextNodes = [...nodesRef.current, plan.configNode];
+            const nextConnections = [...connectionsRef.current, ...plan.connections];
+            nodesRef.current = nextNodes;
+            connectionsRef.current = nextConnections;
+            setNodes(nextNodes);
+            setConnections(nextConnections);
+            setSelectedNodeIds(new Set([plan.configNode.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(plan.configNode.id);
+        },
+        [message, t],
     );
 
     const insertAssistantImage = useCallback(
@@ -3595,6 +3737,7 @@ function InfiniteCanvasPage() {
                     onReverseVideoPrompt={createVideoReversePromptNodes}
                     onProductionBoard={createProductionBoardNodes}
                     onRenderProductionBoard={(node) => void renderProductionBoardBoard(node)}
+                    onGenerateVideoFromPrompt={generateVideoFromProductionBoardPrompt}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
@@ -3636,6 +3779,8 @@ function InfiniteCanvasPage() {
                     onBackgroundModeChange={setBackgroundMode}
                     onShowImageInfoChange={setShowImageInfo}
                 />
+
+                <CanvasStageProgress stage={productionBoardStage} />
 
                 {isMiniMapOpen ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} onViewportChange={setViewport} /> : null}
 

@@ -101,9 +101,11 @@ export type CanvasNodeMetadata = {
     /**
      * 制作规划表链路里这个节点扮演的角色。用 metadata 显式标记，而不是靠标题或提示词文本去猜：
      * prompt 是入口建的提示词节点，config 是承载模型/Key 选择的配置节点，
-     * analysis 是配置节点生成出来的、承载结构化分析 JSON（可手工修改）的文本节点。
+     * analysis 是配置节点生成出来的、承载结构化分析 JSON（可手工修改）的文本节点，
+     * videoPrompt 是渲染成功后从同一份 JSON 里拆出来的反推视频提示词文本节点，
+     * board 是渲染出来的规划板图片节点。
      */
-    productionBoardRole?: "prompt" | "config" | "analysis";
+    productionBoardRole?: "prompt" | "config" | "analysis" | "videoPrompt" | "board";
     interactive?: boolean; // Plugin node interaction/move state; see CanvasNodeDefinition.interactionToggle.
 };
 
