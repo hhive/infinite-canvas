@@ -664,7 +664,8 @@ describe("制作规划表入口", () => {
 
     it("反推提示词是独立的一次调用，排在板面分析之前，且共用同一批抽帧", () => {
         const source = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
-        const reverseCall = source.indexOf("VIDEO_PROMPT_REVERSE_PRESET");
+        // 锚在**调用处**而不是常量名：常量在模块顶部，用它定位会让顺序断言恒真、失去意义。
+        const reverseCall = source.indexOf("buildNodeResponseMessages({ ...generationContext, prompt: VIDEO_PROMPT_REVERSE_PRESET })");
         const boardCall = source.indexOf("buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt })");
 
         // 两次调用：反推提示词在前，板面分析在后
@@ -743,6 +744,35 @@ describe("制作规划表入口", () => {
         expect(findProductionBoardBoardNode(promptNode.id, nodes, [])).toBeNull();
         // 别人家的规划板不会被误当成这一组的
         expect(findProductionBoardBoardNode(promptNode.id, nodes, connections)).not.toBe(otherBoard);
+    });
+
+    it("同一分析节点下有多张规划板时取最新那张，旧板不删也不该被选中", () => {
+        // 改完 JSON 点「渲染规划板」会再追加一张图片节点，旧节点仍在画布上且同样连自分析节点。
+        const analysisNode = textNode();
+        const promptNode = buildProductionBoardVideoPromptNode(analysisNode, "一段提示词");
+        const makeBoard = (id: string): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: "制作规划表", position: { x: 1300, y: 220 }, width: 340, height: 604, metadata: { productionBoardRole: "board" } });
+        const oldBoard = makeBoard("image-old");
+        const newBoard = makeBoard("image-new");
+        const connections: CanvasConnection[] = [
+            { id: "c1", fromNodeId: analysisNode.id, toNodeId: promptNode.id },
+            { id: "c2", fromNodeId: analysisNode.id, toNodeId: oldBoard.id },
+            { id: "c3", fromNodeId: analysisNode.id, toNodeId: newBoard.id },
+        ];
+
+        // 节点数组顺序即创建顺序，新板在后
+        expect(findProductionBoardBoardNode(promptNode.id, [analysisNode, promptNode, oldBoard, newBoard], connections)?.id).toBe(newBoard.id);
+    });
+
+    it("视频配置节点不压在规划板图片节点上", () => {
+        const analysisNode = textNode();
+        const promptNode = buildProductionBoardVideoPromptNode(analysisNode, "一段提示词");
+        const { imageNode: boardNode } = buildProductionBoardImageNodes(analysisNode, uploadedImage());
+        const { configNode } = buildProductionBoardVideoNodes(promptNode, boardNode);
+
+        const overlaps = (a: CanvasNodeData, b: CanvasNodeData) => a.position.x < b.position.x + b.width && b.position.x < a.position.x + a.width && a.position.y < b.position.y + b.height && b.position.y < a.position.y + a.height;
+
+        expect(overlaps(configNode, boardNode)).toBe(false);
+        expect(overlaps(configNode, promptNode)).toBe(false);
     });
 
     it("工具栏提供生成制作规划表与渲染规划板两个入口并接线到画布", () => {

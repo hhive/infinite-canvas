@@ -459,7 +459,13 @@ export function findProductionBoardBoardNode(promptNodeId: string, nodes: Canvas
     const analysisIds = new Set(connections.filter((connection) => connection.toNodeId === promptNodeId).map((connection) => connection.fromNodeId));
     if (!analysisIds.size) return null;
     const boardIds = new Set(connections.filter((connection) => analysisIds.has(connection.fromNodeId)).map((connection) => connection.toNodeId));
-    return nodes.find((node) => boardIds.has(node.id) && node.metadata?.productionBoardRole === "board") ?? null;
+    // 从后往前找：改完 JSON 重新渲染规划板会在同一个分析节点下**再追加**一张图片节点、旧节点不删除，
+    // 两个 id 都在 boardIds 里。取第一个匹配会稳定地拿到过期的那张板，用户就会拿着旧板付费生成视频。
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+        const node = nodes[index];
+        if (boardIds.has(node.id) && node.metadata?.productionBoardRole === "board") return node;
+    }
+    return null;
 }
 
 /**
@@ -468,6 +474,9 @@ export function findProductionBoardBoardNode(promptNodeId: string, nodes: Canvas
  * composerContent 故意留空：空值时生成链路会汇总全部上游资源——提示词节点的文字拼进 prompt，
  * 规划板图片进参考素材。这与既有 generateImageFromTextNode 走的是同一条分支。
  * 规划板图片节点不存在（比如用户删了）时只连提示词节点，不报错：提示词本身仍可独立使用。
+ *
+ * 放在提示词节点**正下方**而不是右侧：提示词节点右侧那一列正是规划板图片节点所在列
+ * （两者都是 analysis.x + 340 + 96 起算），放右侧会让配置节点直接压在规划板下半部上。
  */
 export function buildProductionBoardVideoNodes(promptNode: CanvasNodeData, boardNode: CanvasNodeData | null): ProductionBoardVideoPlan {
     const gap = 96;
@@ -476,8 +485,8 @@ export function buildProductionBoardVideoNodes(promptNode: CanvasNodeData, board
         ...createCanvasNode(
             CanvasNodeType.Config,
             {
-                x: promptNode.position.x + promptNode.width + gap + configSpec.width / 2,
-                y: promptNode.position.y + promptNode.height / 2,
+                x: promptNode.position.x + promptNode.width / 2,
+                y: promptNode.position.y + promptNode.height + gap + configSpec.height / 2,
             },
             { generationMode: "video", model: "", count: 1 },
         ),
@@ -3039,7 +3048,10 @@ function InfiniteCanvasPage() {
                         if (isGenerationCanceled(error)) throw error;
                         message.warning(t("canvas.projectPage.productionBoardReversePromptFailed", { reason: error instanceof Error ? error.message : t("canvas.projectPage.generationFailed") }));
                     }
-                    setProductionBoardStage("board");
+                    // 这一步真的成功才把它标成「已完成」。失败时收掉阶段条而不是继续前进：
+                    // 打勾会和刚弹出的失败告警自相矛盾，也看不出是哪一步失败了；后面的板面分析
+                    // 仍有节点自身的 loading 与渲染提示兜着。
+                    setProductionBoardStage(productionBoardReversePrompt.trim() ? "board" : null);
                 }
 
                 const textMessages = buildNodeResponseMessages({ ...generationContext, prompt: effectivePrompt });
