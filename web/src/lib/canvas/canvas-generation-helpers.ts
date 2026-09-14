@@ -83,6 +83,21 @@ export function getGenerationCount(count: string) {
     return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
 }
 
+/**
+ * 发起生成时要发送的那段「组装提示词原始输入」。
+ *
+ * 三条入口（配置节点面板按钮、画布 Agent 的 run_generation、重新生成）必须取同一处，否则重试/重生成会拿到
+ * 生成时已经合成过一次的文本，把上游文本块与参考素材再追加一次。
+ *
+ * **配置节点只认 `composerContent`**：`metadata.prompt` 上留的是生成时写回的合成结果，
+ * 读它会把污染值再合成一遍，而且读=写会一直重复下去（旧数据因此永远不会自愈）。
+ * 组装提示词留空时返回空串，交给调用方走上游汇总分支。
+ */
+export function resolveGenerationInputPrompt(node: CanvasNodeData | undefined): string {
+    if (node?.type === CanvasNodeType.Config) return node.metadata?.composerContent ?? "";
+    return node?.metadata?.prompt ?? "";
+}
+
 export function getInputSummary(inputs: NodeGenerationInput[]) {
     const resources = [...new Map(inputs.flatMap((input) => (input.type === "group" ? input.children : [input])).map((input) => [input.nodeId, input])).values()];
     return {

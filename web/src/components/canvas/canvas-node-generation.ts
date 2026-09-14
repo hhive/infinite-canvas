@@ -52,7 +52,9 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     const sourceNode = nodes.find((node) => node.id === nodeId);
     // 抽帧速率是「被生成的那个节点」上的设置：视频反推时用户改的是配置节点的文本模式设置。
     const videoFrameRate = resolveFrameRate(sourceNode?.metadata?.videoFrameRate);
-    if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
+    // 判定看的是**本次要发送的这段文本**有没有 @ 引用，因为它才是 composer 分支真正解析的对象。
+    // 组装提示词里写了说明却没写 @ 时与留空同义：走上游汇总，否则已连接的提示词与参考素材会被静默丢掉。
+    if (sourceNode?.type === CanvasNodeType.Config && hasComposerReferences(prompt)) {
         return buildComposerGenerationContext(inputs, prompt, videoFrameRate);
     }
 
@@ -64,7 +66,9 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     const referenceAudios = resourceInputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
 
     return {
-        prompt: upstreamText ? `${prompt}\n\n${upstreamText}` : prompt,
+        // filter(Boolean) 拼接：组装提示词留空时正文前不再留一段空行，
+        // 「留空」与「只写了说明文字」两条路径得到同一种结构。
+        prompt: [prompt.trim(), upstreamText].filter(Boolean).join("\n\n"),
         referenceImages,
         referenceVideos,
         referenceAudios,
@@ -78,19 +82,28 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     };
 }
 
+/**
+ * 组装提示词里的资源引用令牌。
+ * 判定用的这个正则**不能带 g 标志**：带 g 时 test() 会改写 lastIndex，同一个正则跨调用会开始漏判。
+ */
+const COMPOSER_REFERENCE_TOKEN = /@\[node:[^\]]+\]/;
+
+/** 这段文本里是否写了组装提示词的资源引用。只有写了 @ 的文本才该走 composer 分支。 */
+function hasComposerReferences(value: string | undefined): boolean {
+    return Boolean(value && COMPOSER_REFERENCE_TOKEN.test(value));
+}
+
 function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string, videoFrameRate: number): NodeGenerationContext {
     const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
     const selectedInputs: NodeGenerationResourceInput[] = [];
     const labelByNodeId = new Map<string, string>();
     const textBlocks: string[] = [];
     const counts = { image: 0, video: 0, audio: 0, text: 0 };
-    let hasToken = false;
     let lastIndex = 0;
     let nextPrompt = "";
 
     for (const match of prompt.matchAll(/@\[node:([^\]]+)\]/g)) {
         if (match.index === undefined) continue;
-        hasToken = true;
         nextPrompt += prompt.slice(lastIndex, match.index);
         const input = inputByNodeId.get(match[1]);
         if (input) {
@@ -114,21 +127,6 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     const referenceImages = selectedInputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
     const referenceVideos = selectedInputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = selectedInputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));
-
-    if (!hasToken) {
-        return {
-            prompt,
-            referenceImages: [],
-            referenceVideos: [],
-            referenceAudios: [],
-            videoFrames: [],
-            videoFrameRate,
-            textCount: 0,
-            imageCount: 0,
-            videoCount: 0,
-            audioCount: 0,
-        };
-    }
 
     return {
         prompt: nextPrompt,

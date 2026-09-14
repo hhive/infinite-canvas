@@ -6,6 +6,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildCanvasTextAttempts, buildPluginBuiltinPrompt, buildProductionBoardImageNodes, buildProductionBoardNodes, buildProductionBoardVideoNodes, buildProductionBoardVideoPromptConnection, buildProductionBoardVideoPromptNode, buildRetriedProductionBoardNode, buildVideoReversePromptNodes, canReversePromptFromVideoNode, CanvasTopBar, findProductionBoardBoardNode, findProductionBoardSourceNodes, hasActiveCanvasMediaTask, prepareCanvasTextAttempts, renderProductionBoardFromText, resolveTextModelWriteback, shouldRenderProductionBoardOnRetry, type ProductionBoardDeps } from "@/pages/canvas/project";
+import { resolveGenerationInputPrompt } from "@/lib/canvas/canvas-generation-helpers";
+import { buildNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
 import { retryTextModelAttempts, TextModelFallbackError } from "@/lib/canvas/text-model-fallback";
 import type { ProductionBoardAnalysis } from "@/lib/canvas/production-board-schema";
 import { resolveFrameRate, type SampledVideoFrame, type VideoFrameSamplingResult } from "@/lib/canvas/video-frame-sampling";
@@ -719,6 +721,44 @@ describe("制作规划表入口", () => {
             [promptNode.id, configNode.id],
             [boardNode.id, configNode.id],
         ]);
+    });
+
+    it("配置节点的生成输入只认组装提示词，不读 metadata.prompt 上的合成结果", () => {
+        const withComposer: CanvasNodeData = { ...textNode(), type: CanvasNodeType.Config, metadata: { generationMode: "video", composerContent: "生成视频" } };
+        // 旧版本会在 metadata.prompt 上留下生成时的合成结果：读它会把上游文本块再合成一遍，且读=写永不自愈
+        const contaminated: CanvasNodeData = { ...withComposer, metadata: { ...withComposer.metadata, prompt: "生成视频\n\n【文本1】\n低角度手持，沿田埂向前推进。" } };
+
+        expect(resolveGenerationInputPrompt(withComposer)).toBe("生成视频");
+        expect(resolveGenerationInputPrompt(contaminated)).toBe("生成视频");
+        // 「用此提示词生成视频」建出来的节点组装提示词是空的：给空串走上游汇总，而不是那份合成结果
+        expect(resolveGenerationInputPrompt({ ...withComposer, metadata: { generationMode: "video", prompt: "合成结果" } })).toBe("");
+        expect(resolveGenerationInputPrompt(undefined)).toBe("");
+    });
+
+    it("旧节点上的合成结果不会把上游文本块再追加一次：读取侧取值后合成结果与首次一致", () => {
+        const config: CanvasNodeData = { ...textNode(), id: "config-1", type: CanvasNodeType.Config, metadata: { generationMode: "video", composerContent: "生成视频" } };
+        const text: CanvasNodeData = { id: "text-1", type: CanvasNodeType.Text, title: "反推视频提示词", position: { x: 0, y: 0 }, width: 320, height: 200, metadata: { content: "低角度手持，沿田埂向前推进。" } };
+        const image: CanvasNodeData = { id: "image-1", type: CanvasNodeType.Image, title: "制作规划表", position: { x: 0, y: 0 }, width: 320, height: 560, metadata: { content: "data:image/webp;base64,BOARD" } };
+        const connections: CanvasConnection[] = [
+            { id: "c1", fromNodeId: "text-1", toNodeId: "config-1" },
+            { id: "c2", fromNodeId: "image-1", toNodeId: "config-1" },
+        ];
+        // 生成时写回的合成结果（旧版本的数据就是这样）
+        const stored: CanvasNodeData = { ...config, metadata: { ...config.metadata, prompt: "生成视频\n\n【文本1】\n低角度手持，沿田埂向前推进。" } };
+        const built = buildNodeGenerationContext(stored.id, [stored, text, image], connections, resolveGenerationInputPrompt(stored));
+
+        expect(built.prompt.match(/低角度手持/g)).toHaveLength(1);
+        expect(built.referenceImages).toHaveLength(1);
+    });
+
+    it("面板按钮、Agent 与重新生成三条入口取同一份原始输入", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/pages/canvas/project.tsx"), "utf8");
+        const bridge = readFileSync(resolve(process.cwd(), "src/pages/canvas/hooks/use-agent-bridge.ts"), "utf8");
+
+        // 重新生成：配置节点走原始输入取值，不再回落到结果节点上的合成文本
+        expect(source).toContain("sourceNode.type === CanvasNodeType.Config ? resolveGenerationInputPrompt(sourceNode)");
+        expect(source).toContain("handleGenerateNode(nodeId, target?.metadata?.generationMode || \"image\", resolveGenerationInputPrompt(target))");
+        expect(bridge).toContain("resolveGenerationInputPrompt(target)");
     });
 
     it("规划板还没渲染出来时只连提示词节点，不报错", () => {

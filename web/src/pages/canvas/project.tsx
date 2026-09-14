@@ -24,6 +24,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "@/lib/canvas/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { resolveGenerationInputPrompt } from "@/lib/canvas/canvas-generation-helpers";
 import { App, Button, Dropdown, Modal } from "antd";
 import { captureVideoFrame, type VideoFramePosition } from "@/lib/canvas/canvas-video-frame";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
@@ -2727,6 +2728,8 @@ function InfiniteCanvasPage() {
                 return;
             }
             const markSourceStatus = sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
+            // 配置节点同样记合成结果：这份 metadata.prompt 只作记录（Agent 读画布、节点信息展示），
+            // 生成入口一律用 resolveGenerationInputPrompt 取组装提示词的原始输入，不会把合成结果当输入再合成一次。
             const statusPrompt = sourceNode?.type === CanvasNodeType.Config ? effectivePrompt : prompt;
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
                 finishGenerationRequest(nodeId, runController);
@@ -3214,7 +3217,10 @@ function InfiniteCanvasPage() {
                 return;
             }
 
-            const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
+            // 重试要拿**与生成时同一份原始输入**重新合成。配置节点一律取组装提示词的原始输入，
+            // 不再回落到结果节点上的合成文本（那会让上游文本块与参考素材被追加第二次）。
+            const retryPromptInput = sourceNode.type === CanvasNodeType.Config ? resolveGenerationInputPrompt(sourceNode) : sourceNode.metadata?.prompt || node.metadata?.prompt || "";
+            const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, retryPromptInput));
             const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
             if (!prompt) {
                 message.warning("找不到提示词，无法重试");
@@ -3561,7 +3567,7 @@ function InfiniteCanvasPage() {
                 onStop={confirmStopGeneration}
                 onGenerate={(nodeId) => {
                     const target = nodesRef.current.find((item) => item.id === nodeId);
-                    void handleGenerateNode(nodeId, target?.metadata?.generationMode || "image", target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
+                    void handleGenerateNode(nodeId, target?.metadata?.generationMode || "image", resolveGenerationInputPrompt(target));
                 }}
             />
         ),

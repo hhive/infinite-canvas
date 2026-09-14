@@ -17,7 +17,7 @@ vi.mock("@/services/file-storage", () => ({
 }));
 
 import { buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGenerationContext, videoFrameLabel, videoFrameTruncationNotice, type NodeGenerationContext, type NodeGenerationVideoFrames, type VideoFrameSamplingSummary } from "@/components/canvas/canvas-node-generation";
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import type { ReferenceVideo } from "@/types/media";
 import { DEFAULT_VIDEO_REVERSE_FRAME_RATE } from "@/lib/canvas/video-frame-sampling-plan";
 
@@ -301,11 +301,85 @@ describe("buildNodeGenerationContext 的抽帧速率", () => {
         expect(buildNodeGenerationContext("config-1", [configNode({ generationMode: "text", videoFrameRate: 99 })], [], "提示词").videoFrameRate).toBe(5);
     });
 
-    it("组装模式（composer）也带上速率：有令牌与无令牌两条分支都不漏", () => {
+    it("组装提示词的两条走法都带上速率：含 @ 引用走 composer 分支，无引用走汇总分支", () => {
         const withToken = buildNodeGenerationContext("config-1", [configNode({ composerContent: "@[node:v1]", videoFrameRate: 4 })], [], "根据 @[node:v1] 反推");
         expect(withToken.videoFrameRate).toBe(4);
 
         const withoutToken = buildNodeGenerationContext("config-1", [configNode({ composerContent: "  没有令牌  ", videoFrameRate: 4 })], [], "根据参考视频反推");
         expect(withoutToken.videoFrameRate).toBe(4);
+    });
+});
+
+describe("buildNodeGenerationContext 的组装提示词与上游资源", () => {
+    const CONFIG_ID = "config-1";
+    const TEXT_ID = "text-1";
+    const IMAGE_ID = "image-1";
+    const UPSTREAM_TEXT = "低角度手持，沿田埂向前推进。";
+
+    function nodesWithUpstream(metadata: CanvasNodeData["metadata"]): CanvasNodeData[] {
+        return [
+            configNode(metadata),
+            { id: TEXT_ID, type: CanvasNodeType.Text, title: "反推视频提示词", position: { x: 0, y: 0 }, width: 320, height: 200, metadata: { content: UPSTREAM_TEXT } },
+            { id: IMAGE_ID, type: CanvasNodeType.Image, title: "制作规划表", position: { x: 0, y: 0 }, width: 320, height: 560, metadata: { content: "data:image/webp;base64,BOARD" } },
+        ];
+    }
+
+    function upstreamConnections(): CanvasConnection[] {
+        return [
+            { id: "c1", fromNodeId: TEXT_ID, toNodeId: CONFIG_ID },
+            { id: "c2", fromNodeId: IMAGE_ID, toNodeId: CONFIG_ID },
+        ];
+    }
+
+    it("组装提示词写了说明但没有 @ 引用时，已连接的提示词与规划板要一起带上", () => {
+        const built = buildNodeGenerationContext(CONFIG_ID, nodesWithUpstream({ generationMode: "video", composerContent: "生成视频" }), upstreamConnections(), "生成视频");
+
+        // 说明文字仍然在最前，模型看得到这次的任务意图
+        expect(built.prompt.startsWith("生成视频")).toBe(true);
+        expect(built.prompt).toContain(UPSTREAM_TEXT);
+        expect(built.referenceImages).toHaveLength(1);
+        expect(built.textCount).toBe(1);
+        expect(built.imageCount).toBe(1);
+    });
+
+    it("组装提示词留空与「写了说明但没有 @ 引用」走同一条汇总路径", () => {
+        const connections = upstreamConnections();
+        const blank = buildNodeGenerationContext(CONFIG_ID, nodesWithUpstream({ generationMode: "video" }), connections, "");
+        const withText = buildNodeGenerationContext(CONFIG_ID, nodesWithUpstream({ generationMode: "video", composerContent: "生成视频" }), connections, "生成视频");
+
+        expect(blank.prompt).toContain(UPSTREAM_TEXT);
+        expect(blank.referenceImages).toHaveLength(1);
+        expect(blank.prompt).toBe(withText.prompt.replace("生成视频\n\n", ""));
+        expect(blank.referenceImages).toHaveLength(withText.referenceImages.length);
+    });
+
+    it("写了 @ 引用时仍只带被引用的资源，未引用的上游资源不进来", () => {
+        const built = buildNodeGenerationContext(CONFIG_ID, nodesWithUpstream({ generationMode: "video", composerContent: `参考提示词：@[node:${TEXT_ID}]` }), upstreamConnections(), `参考提示词：@[node:${TEXT_ID}]`);
+
+        expect(built.prompt).toContain(UPSTREAM_TEXT);
+        expect(built.textCount).toBe(1);
+        expect(built.imageCount).toBe(0);
+        expect(built.referenceImages).toHaveLength(0);
+    });
+
+    it("没有上游连线时只发组装提示词本身，不产生多余空段", () => {
+        const built = buildNodeGenerationContext(CONFIG_ID, nodesWithUpstream({ generationMode: "video", composerContent: "生成视频" }), [], "生成视频");
+
+        expect(built.prompt).toBe("生成视频");
+        expect(built.referenceImages).toHaveLength(0);
+        expect(built.textCount).toBe(0);
+        expect(built.imageCount).toBe(0);
+    });
+
+    it("重复合成同一份组装提示词不会让上游文本块翻倍，参考图也只有一份", () => {
+        const nodes = nodesWithUpstream({ generationMode: "video", composerContent: "生成视频" });
+        const connections = upstreamConnections();
+        // 两次生成（首次与重试）取的是同一份原始输入，结果必须逐字一致
+        const first = buildNodeGenerationContext(CONFIG_ID, nodes, connections, "生成视频");
+        const retry = buildNodeGenerationContext(CONFIG_ID, nodes, connections, "生成视频");
+
+        expect(retry.prompt).toBe(first.prompt);
+        expect(retry.prompt.match(/低角度手持/g)).toHaveLength(1);
+        expect(retry.referenceImages).toHaveLength(1);
     });
 });
