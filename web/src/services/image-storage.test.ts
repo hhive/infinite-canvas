@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const storage = vi.hoisted(() => new Map<string, Blob>());
+// `image-storage` keeps image previews in their own IndexedDB object store, so the mock has to
+// separate them too; otherwise a preview write would clobber the image blob under the same key.
+const previewStorage = vi.hoisted(() => new Map<string, unknown>());
 const setItemMock = vi.hoisted(() => vi.fn(async (key: string, value: Blob) => {
     storage.set(key, value);
     return value;
@@ -14,12 +17,23 @@ const FORMAT_ERROR_MESSAGE = "图片格式无效，仅支持有效的 PNG、JPEG
 
 vi.mock("localforage", () => ({
     default: {
-        createInstance: () => ({
-            setItem: setItemMock,
-            getItem: vi.fn(async (key: string) => storage.get(key) ?? null),
-            removeItem: vi.fn(async (key: string) => storage.delete(key)),
-            iterate: vi.fn(async () => undefined),
-        }),
+        createInstance: (options?: { storeName?: string }) =>
+            options?.storeName === "image_previews"
+                ? {
+                      setItem: vi.fn(async (key: string, value: unknown) => {
+                          previewStorage.set(key, value);
+                          return value;
+                      }),
+                      getItem: vi.fn(async (key: string) => previewStorage.get(key) ?? null),
+                      removeItem: vi.fn(async (key: string) => previewStorage.delete(key)),
+                      iterate: vi.fn(async () => undefined),
+                  }
+                : {
+                      setItem: setItemMock,
+                      getItem: vi.fn(async (key: string) => storage.get(key) ?? null),
+                      removeItem: vi.fn(async (key: string) => storage.delete(key)),
+                      iterate: vi.fn(async () => undefined),
+                  },
     },
 }));
 
@@ -39,6 +53,7 @@ function readAsDataUrl(blob: Blob) {
 describe("image storage MIME normalization", () => {
     beforeEach(() => {
         storage.clear();
+        previewStorage.clear();
         setItemMock.mockClear();
         const objectUrlBlobs = new Map<string, Blob>();
         let objectUrlIndex = 0;
