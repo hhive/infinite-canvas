@@ -13,6 +13,15 @@ describe("shouldInitializeClientRoot", () => {
         expect(shouldInitializeClientRoot("/config")).toBe(true);
     });
 
+    it("initializes canvas project sub-routes", () => {
+        // /canvas/:id（画布项目页）是产品内可达路由：列表与项目卡片都会导航过去，
+        // 硬刷新或直链进入时同样要初始化，否则会话探测、媒体模型目录与 launch 参数消费会整条丢失。
+        expect(shouldInitializeClientRoot("/canvas/abc123")).toBe(true);
+        expect(shouldInitializeClientRoot("/canvas/")).toBe(true);
+        // 段边界：同前缀的其它路径不享受豁免。
+        expect(shouldInitializeClientRoot("/canvases")).toBe(false);
+    });
+
     it("does not initialize on routes that never need it", () => {
         // 定价页是纯展示；用户配置页只做账号操作，弹渠道配置框会盖住登录引导。
         expect(shouldInitializeClientRoot("/pricing")).toBe(false);
@@ -34,19 +43,25 @@ describe("shouldInitializeClientRoot", () => {
 });
 
 describe("shouldAutoOpenConfigDialog", () => {
-    it("does not prompt anonymous visitors who never supplied a key", () => {
+    it("does not prompt anonymous visitors with no credential context", () => {
         // 探测失败只说明「没有可用凭据」，这在匿名首访是正常状态，不该弹渠道配置框。
-        expect(shouldAutoOpenConfigDialog(false, "")).toBe(false);
-        expect(shouldAutoOpenConfigDialog(false, "   ")).toBe(false);
+        expect(shouldAutoOpenConfigDialog(false, "", false)).toBe(false);
+        expect(shouldAutoOpenConfigDialog(false, "   ", false)).toBe(false);
     });
 
     it("prompts when an explicitly supplied key failed", () => {
-        expect(shouldAutoOpenConfigDialog(false, "sk-explicit-and-invalid")).toBe(true);
+        expect(shouldAutoOpenConfigDialog(false, "sk-explicit-and-invalid", false)).toBe(true);
+    });
+
+    it("prompts when a session exists but the probe failed", () => {
+        // launch / password 会话失效时提示重配（计划验收 #4）。
+        expect(shouldAutoOpenConfigDialog(false, "", true)).toBe(true);
     });
 
     it("never prompts after a successful probe", () => {
-        expect(shouldAutoOpenConfigDialog(true, "")).toBe(false);
-        expect(shouldAutoOpenConfigDialog(true, "sk-explicit")).toBe(false);
+        expect(shouldAutoOpenConfigDialog(true, "", false)).toBe(false);
+        expect(shouldAutoOpenConfigDialog(true, "sk-explicit", false)).toBe(false);
+        expect(shouldAutoOpenConfigDialog(true, "", true)).toBe(false);
     });
 
     it("keeps restored video models when the generic image model request finishes later", () => {

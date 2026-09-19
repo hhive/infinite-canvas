@@ -760,7 +760,6 @@ export default {
         keysKey: "API Key",
         keysCopy: "复制",
         keysCopySuccess: "API Key 已复制",
-        keysCopyFailed: "复制失败，请手动选择",
         keysExpiresAt: "过期时间",
         keysNeverExpires: "永不过期",
         keysLastUsedIp: "最近使用 IP",

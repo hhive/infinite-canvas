@@ -38,7 +38,7 @@ function AccountUsage() {
 
     // 统计卡与 Sub2API 面板同源：`/usage/stats` 随日期范围与筛选变化。
     // 此前用 `/usage/dashboard/stats`（无参、全生命周期），导致改筛选时卡片纹丝不动。
-    const stats = useAccountResource((signal) => fetchUsageStats(dateRange, signal), [startDate, endDate, model, apiKeyId]);
+    const stats = useAccountResource((signal) => fetchUsageStats({ ...dateRange, model, api_key_id: apiKeyId }, signal), [startDate, endDate, model, apiKeyId]);
     // 模型统计表同样要跟随筛选，否则改了模型/Key 它不联动。
     const models = useAccountResource((signal) => fetchDashboardModels({ ...dateRange, model, api_key_id: apiKeyId }, signal), [startDate, endDate, model, apiKeyId]);
     const keys = useAccountResource((signal) => fetchAPIKeys(1, 100, signal));

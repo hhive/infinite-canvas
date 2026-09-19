@@ -760,7 +760,6 @@ export default {
         keysKey: "API Key",
         keysCopy: "Copy",
         keysCopySuccess: "API key copied",
-        keysCopyFailed: "Copy failed, select it manually",
         keysExpiresAt: "Expires at",
         keysNeverExpires: "Never expires",
         keysLastUsedIp: "Last used IP",

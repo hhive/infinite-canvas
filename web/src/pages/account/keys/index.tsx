@@ -4,6 +4,7 @@ import type { ColumnsType } from "antd/es/table";
 import { Copy, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useCopyText } from "@/hooks/use-copy-text";
 import { AccountErrorState, AccountPanel } from "@/pages/account/components/panel";
 import { AccountSessionGate } from "@/pages/account/components/session-gate";
 import { useAccountResource } from "@/pages/account/components/use-account-resource";
@@ -32,6 +33,9 @@ export default function AccountKeysPage() {
 function AccountKeys() {
     const { message } = App.useApp();
     const { t } = useTranslation();
+    // 列表只展示打码值（与 Sub2API 面板一致），完整明文仅通过复制交给用户；
+    // 用仓库既有的 useCopyText（copy-to-clipboard，带 execCommand 降级），不直接用 navigator.clipboard。
+    const copyText = useCopyText();
     const [page, setPage] = useState(1);
     const [dialog, setDialog] = useState<{ mode: "create" } | { mode: "edit"; key: APIKey } | null>(null);
     const [saving, setSaving] = useState(false);
@@ -92,16 +96,6 @@ function AccountKeys() {
         }
     };
 
-    // 列表只展示打码值（与 Sub2API 面板一致），完整明文仅通过复制交给用户。
-    const copyKey = async (key: APIKey) => {
-        try {
-            await navigator.clipboard.writeText(key.key);
-            message.success(t("account.keysCopySuccess"));
-        } catch {
-            message.error(t("account.keysCopyFailed"));
-        }
-    };
-
     const statusText = (status: APIKey["status"]) =>
         ({ active: t("account.keysStatusActive"), inactive: t("account.keysStatusInactive"), quota_exhausted: t("account.keysStatusQuotaExhausted"), expired: t("account.keysStatusExpired") })[status] ?? status;
 
@@ -125,7 +119,7 @@ function AccountKeys() {
             render: (_, key) => (
                 <div className="flex items-center gap-1">
                     <code className="break-all text-xs text-stone-500 dark:text-stone-400">{maskAPIKey(key.key)}</code>
-                    <Button type="text" size="small" aria-label={t("account.keysCopy")} title={t("account.keysCopy")} onClick={() => void copyKey(key)}>
+                    <Button type="text" size="small" aria-label={t("account.keysCopy")} title={t("account.keysCopy")} onClick={() => copyText(key.key, t("account.keysCopySuccess"))}>
                         <Copy className="size-3.5" />
                     </Button>
                 </div>
