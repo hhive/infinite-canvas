@@ -21,11 +21,22 @@ export default function AccountRedeemPage() {
 
     return (
         <div className="space-y-6">
-            {/* 购买跳转来自 Sub2API 的公开设置，为空时整块隐藏，不展示一个不可用的按钮 */}
+            {/*
+              购买跳转来自 Sub2API 的公开设置，为空时整块隐藏，不展示一个不可用的按钮。
+
+              刻意不把跳转地址打印在界面上：那是第三方购码站域名，对客户只暴露我们自己的入口即可
+              （说明文案保持中性，不出现该域名）。
+            */}
             {purchaseUrl ? (
-                <AccountPanel title={t("account.redeemPurchase")} description={t("account.redeemPurchaseHint")} extra={<Button type="primary" icon={<ExternalLink className="size-4" />} href={purchaseUrl} target="_blank" rel="noopener noreferrer">{t("account.redeemPurchase")}</Button>}>
-                    <p className="break-all text-sm text-stone-500 dark:text-stone-400">{purchaseUrl}</p>
-                </AccountPanel>
+                <AccountPanel
+                    title={t("account.redeemPurchase")}
+                    description={t("account.redeemPurchaseHint")}
+                    extra={
+                        <Button type="primary" icon={<ExternalLink className="size-4" />} href={purchaseUrl} target="_blank" rel="noopener noreferrer">
+                            {t("account.redeemPurchase")}
+                        </Button>
+                    }
+                />
             ) : null}
 
             <AccountSessionGate>

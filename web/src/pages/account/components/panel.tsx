@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
 
-export function AccountPanel({ title, description, extra, children, className }: { title?: ReactNode; description?: ReactNode; extra?: ReactNode; children: ReactNode; className?: string }) {
+export function AccountPanel({ title, description, extra, children, className }: { title?: ReactNode; description?: ReactNode; extra?: ReactNode; children?: ReactNode; className?: string }) {
     return (
         <section className={cn("rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-950", className)}>
             {title || extra ? (
@@ -16,7 +16,7 @@ export function AccountPanel({ title, description, extra, children, className }:
                     {extra}
                 </header>
             ) : null}
-            <div className="p-5">{children}</div>
+            {children ? <div className="p-5">{children}</div> : null}
         </section>
     );
 }
