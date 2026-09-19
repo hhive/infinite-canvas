@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
 import type { MediaCapability, MediaModel } from "@/services/api/media-models";
+import { useSessionStore } from "@/stores/use-session-store";
 
 export type ApiCallFormat = "openai" | "gemini" | "ark";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -150,6 +151,7 @@ type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
     isConfigOpen: boolean;
+    isLoginPromptOpen: boolean;
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     cookieSessionReady: boolean;
@@ -163,6 +165,8 @@ type ConfigStore = {
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     setCookieSessionReady: (ready: boolean) => void;
     openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
+    openLoginPrompt: () => void;
+    setLoginPromptOpen: (isOpen: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
     clearAPIKeys: () => void;
@@ -240,12 +244,29 @@ function isAiConfigReady(config: AiConfig, model: string, cookieSessionReady = f
     return Boolean(model.trim() && channel.baseUrl.trim() && (channel.apiKey.trim() || cookieSessionReady));
 }
 
+/** 用户是否手填过 Key（顶层 apiKey 或任一渠道的 apiKey）。 */
+function hasManualAPIKey(config: AiConfig) {
+    return Boolean(config.apiKey.trim() || config.channels.some((channel) => channel.apiKey.trim()));
+}
+
+/**
+ * 「用到 Key 却没有 Key」时该给哪一种提示。
+ *
+ * 生成页入口与各生成入口共用：手填过 Key 或存在媒体会话的访客，补救路径是修 Key 或进用户中心，
+ * 给渠道配置框；两者都没有的访客（典型是匿名首访）Key 只能由账号提供，应该给**登录提示**——
+ * 丢一个渠道配置框给他既看不懂也走不通。
+ */
+export function resolveMissingKeyPrompt(manualKeyPresent: boolean, hasSession: boolean): "login" | "config" {
+    return manualKeyPresent || hasSession ? "config" : "login";
+}
+
 export const useConfigStore = create<ConfigStore>()(
     persist(
         (set, get) => ({
             config: defaultConfig,
             webdav: defaultWebdavSyncConfig,
             isConfigOpen: false,
+            isLoginPromptOpen: false,
             configTab: "channels",
             shouldPromptContinue: false,
             cookieSessionReady: false,
@@ -275,7 +296,20 @@ export const useConfigStore = create<ConfigStore>()(
                 })),
             isAiConfigReady: (config, model) => isAiConfigReady(config, model, get().cookieSessionReady),
             setCookieSessionReady: (cookieSessionReady) => set({ cookieSessionReady }),
-            openConfigDialog: (shouldPromptContinue = false, configTab = "channels") => set({ isConfigOpen: true, shouldPromptContinue, configTab }),
+            openConfigDialog: (shouldPromptContinue = false, configTab = "channels") => {
+                // shouldPromptContinue=true 表示「生成流程因缺少配置/Key 被打断」：调用点全部来自
+                // 生成入口（点击生成、模型选择器 onMissingConfig、画布节点生成）。
+                // 这类打断按凭据上下文分诊：既没手填 Key 也没有媒体会话的访客，Key 只能由账号提供，
+                // 应该去登录／注册，而不是拿到一个对他走不通的渠道配置框。
+                // shouldPromptContinue=false 是用户的显式意图（顶栏「系统配置」），永远开配置框。
+                if (shouldPromptContinue && resolveMissingKeyPrompt(hasManualAPIKey(get().config), useSessionStore.getState().authSource !== null) === "login") {
+                    set({ isLoginPromptOpen: true });
+                    return;
+                }
+                set({ isConfigOpen: true, shouldPromptContinue, configTab });
+            },
+            openLoginPrompt: () => set({ isLoginPromptOpen: true }),
+            setLoginPromptOpen: (isLoginPromptOpen) => set({ isLoginPromptOpen }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
             clearAPIKeys: () => set((state) => ({ config: { ...state.config, apiKey: "", channels: state.config.channels.map((channel) => ({ ...channel, apiKey: "" })) } })),

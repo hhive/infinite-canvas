@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cookieSessionReadiness, mergeFetchedChannelModels, shouldAutoOpenConfigDialog, shouldInitializeClientRoot } from "@/components/layout/client-root-init";
+import { configPromptForProbeFailure, cookieSessionReadiness, mergeFetchedChannelModels, shouldInitializeClientRoot } from "@/components/layout/client-root-init";
 import { defaultConfig, selectableModelsByCapability } from "@/stores/use-config-store";
 
 describe("shouldInitializeClientRoot", () => {
@@ -42,27 +42,23 @@ describe("shouldInitializeClientRoot", () => {
     });
 });
 
-describe("shouldAutoOpenConfigDialog", () => {
-    it("does not prompt anonymous visitors with no credential context", () => {
-        // 探测失败只说明「没有可用凭据」，这在匿名首访是正常状态，不该弹渠道配置框。
-        expect(shouldAutoOpenConfigDialog(false, "", false)).toBe(false);
-        expect(shouldAutoOpenConfigDialog(false, "   ", false)).toBe(false);
+describe("configPromptForProbeFailure", () => {
+    it("offers login when the visitor has neither a key nor a session", () => {
+        // 「用到 Key 却没有 Key」且连账号都没有：Key 只能由账号提供，给登录提示，
+        // 而不是丢一个匿名访客看不懂也走不通的渠道配置框。
+        expect(configPromptForProbeFailure("", false)).toBe("login");
+        expect(configPromptForProbeFailure("   ", false)).toBe("login");
     });
 
-    it("prompts when an explicitly supplied key failed", () => {
-        expect(shouldAutoOpenConfigDialog(false, "sk-explicit-and-invalid", false)).toBe(true);
+    it("offers the config dialog when a key was supplied or a session exists", () => {
+        // 这两类人的补救路径是修 Key 或进用户中心，不是登录。
+        expect(configPromptForProbeFailure("sk-explicit-and-invalid", false)).toBe("config");
+        expect(configPromptForProbeFailure("", true)).toBe("config");
+        expect(configPromptForProbeFailure("sk-explicit", true)).toBe("config");
     });
+});
 
-    it("prompts when a session exists but the probe failed", () => {
-        // launch / password 会话失效时提示重配（计划验收 #4）。
-        expect(shouldAutoOpenConfigDialog(false, "", true)).toBe(true);
-    });
-
-    it("never prompts after a successful probe", () => {
-        expect(shouldAutoOpenConfigDialog(true, "", false)).toBe(false);
-        expect(shouldAutoOpenConfigDialog(true, "sk-explicit", false)).toBe(false);
-        expect(shouldAutoOpenConfigDialog(true, "", true)).toBe(false);
-    });
+describe("mergeFetchedChannelModels", () => {
 
     it("keeps restored video models when the generic image model request finishes later", () => {
         const videoModel = { id: 9, mediaType: "video" as const, model: "seedance-video", displayName: "Seedance", providerName: "Provider", apiMode: "videos", priceQuota: 0 };

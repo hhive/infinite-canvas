@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { MediaModel } from "@/services/api/media-models";
-import { defaultConfig, resolveModelForCapability, useConfigStore } from "@/stores/use-config-store";
+import { defaultConfig, resolveMissingKeyPrompt, resolveModelForCapability, useConfigStore } from "@/stores/use-config-store";
+import { resetSessionStoreForTest } from "@/stores/use-session-store";
 
 beforeEach(() => {
     useConfigStore.setState({
@@ -165,5 +166,54 @@ describe("applyMediaModels", () => {
         useConfigStore.getState().applyMediaModels("text", [{ ...imageModel(43, "gpt-6-astra"), id: "gpt-6-astra", mediaType: "text" }]);
 
         expect(useConfigStore.getState().config.textModel).toBe("default::gpt-6-astra");
+    });
+});
+
+describe("missing-key prompt triage", () => {
+    const clearManualKeys = () => {
+        useConfigStore.setState({
+            config: { ...defaultConfig, apiKey: "", channels: defaultConfig.channels.map((channel) => ({ ...channel, apiKey: "" })) },
+            isConfigOpen: false,
+            isLoginPromptOpen: false,
+        });
+    };
+
+    it("resolveMissingKeyPrompt offers login only when there is no credential context", () => {
+        expect(resolveMissingKeyPrompt(false, false)).toBe("login");
+        expect(resolveMissingKeyPrompt(true, false)).toBe("config");
+        expect(resolveMissingKeyPrompt(false, true)).toBe("config");
+        expect(resolveMissingKeyPrompt(true, true)).toBe("config");
+    });
+
+    it("routes the missing-key interruption to the login prompt for visitors with no credential", () => {
+        clearManualKeys();
+        resetSessionStoreForTest();
+
+        useConfigStore.getState().openConfigDialog(true);
+
+        expect(useConfigStore.getState().isLoginPromptOpen).toBe(true);
+        expect(useConfigStore.getState().isConfigOpen).toBe(false);
+    });
+
+    it("keeps the config dialog when the visitor hand-filled a key", () => {
+        // beforeEach 已写入手填 Key；这类人的补救路径是修 Key，不是登录。
+        useConfigStore.setState({ isConfigOpen: false, isLoginPromptOpen: false });
+        resetSessionStoreForTest();
+
+        useConfigStore.getState().openConfigDialog(true);
+
+        expect(useConfigStore.getState().isConfigOpen).toBe(true);
+        expect(useConfigStore.getState().isLoginPromptOpen).toBe(false);
+    });
+
+    it("keeps the config dialog for explicit intent even with no credential", () => {
+        // 顶栏「系统配置」是用户显式意图，永远开配置框，不做登录分诊。
+        clearManualKeys();
+        resetSessionStoreForTest();
+
+        useConfigStore.getState().openConfigDialog(false);
+
+        expect(useConfigStore.getState().isConfigOpen).toBe(true);
+        expect(useConfigStore.getState().isLoginPromptOpen).toBe(false);
     });
 });

@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { App } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { createModelChannel, modelOptionsFromChannels, normalizeChannelModels, useConfigStore, type AiConfig } from "@/stores/use-config-store";
+import { createModelChannel, modelOptionsFromChannels, normalizeChannelModels, resolveMissingKeyPrompt, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { fetchChannelModels, probeImageSession } from "@/services/api/image";
 import { fetchMediaModels, type MediaCapability } from "@/services/api/media-models";
 import { readImageLaunchParams, resolveImageLaunchAuthentication } from "@/lib/image-launch-params";
@@ -20,6 +20,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const config = useConfigStore((state) => state.config);
     const importChannelCredentials = useConfigStore((state) => state.importChannelCredentials);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const openLoginPrompt = useConfigStore((state) => state.openLoginPrompt);
     const clearAPIKeys = useConfigStore((state) => state.clearAPIKeys);
     const setCookieSessionReady = useConfigStore((state) => state.setCookieSessionReady);
     const applyMediaModels = useConfigStore((state) => state.applyMediaModels);
@@ -74,7 +75,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     // 只在失败分支里 await，正常路径不增加延迟。
                     await ensureSessionLoaded().catch(() => undefined);
                     const hasSession = useSessionStore.getState().authSource !== null;
-                    if (shouldAutoOpenConfigDialog(ready, authenticationKey, hasSession)) openConfigDialog(false);
+                    if (configPromptForProbeFailure(authenticationKey, hasSession) === "login") openLoginPrompt();
+                    else openConfigDialog(false);
                     return;
                 }
                 return fetchChannelModels(channel);
@@ -101,7 +103,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     setMediaModelsError(capability, error instanceof Error ? error.message : "读取媒体模型失败", status === 401);
                 });
         }
-    }, [applyMediaModels, clearAPIKeys, config.channels, importChannelCredentials, message, openConfigDialog, setCookieSessionReady, setMediaModelsError, setMediaModelsLoading, t, updateConfig]);
+    }, [applyMediaModels, clearAPIKeys, config.channels, importChannelCredentials, message, openConfigDialog, openLoginPrompt, setCookieSessionReady, setMediaModelsError, setMediaModelsLoading, t, updateConfig]);
 
     return <>{children}</>;
 }
@@ -132,17 +134,15 @@ export function shouldInitializeClientRoot(pathname: string): boolean {
 }
 
 /**
- * 探测失败时是否自动弹「配置模型渠道」对话框。
+ * 探测失败时给哪一种提示。
  *
- * 探测失败（`/api/me` 返回 401/403，见 `probeImageSession`）只说明「当前没有可用凭据」，
- * 无凭据的匿名访客本就处于这个状态，首访即弹一个渠道配置框是打扰而非帮助。
- *
- * 只有**存在凭据上下文却仍然失败**时，弹框才是有效提示：
- *   - 用户显式提供过 Key（URL 参数或已保存的渠道 Key）→ 告诉他这把 Key 不可用；
- *   - 或存在媒体会话（launch / password）→ 会话可能已失效，需要重配。
+ * 探测失败（`/api/me` 返回 401/403，见 `probeImageSession`）说明「当前没有可用凭据」。
+ * 具体给什么，交给 `resolveMissingKeyPrompt` 按凭据上下文分诊：
+ *   - 手填过 Key 或存在媒体会话 → 渠道配置框（他们的补救路径是修 Key / 进用户中心）；
+ *   - 两者都没有（典型是匿名首访）→ **登录提示**，因为 Key 只能由账号提供。
  */
-export function shouldAutoOpenConfigDialog(probeReady: boolean, authenticationKey: string, hasSession: boolean): boolean {
-    return !probeReady && (authenticationKey.trim() !== "" || hasSession);
+export function configPromptForProbeFailure(authenticationKey: string, hasSession: boolean): "login" | "config" {
+    return resolveMissingKeyPrompt(authenticationKey.trim() !== "", hasSession);
 }
 
 export function cookieSessionReadiness(probeSucceeded: boolean, authenticationKey: string) {

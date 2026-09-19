@@ -29,6 +29,7 @@ vi.mock("react-router-dom", () => ({
 
 vi.mock("@/constant/navigation-tools", () => ({ navigationTools: [], visibleNavigationTools: () => [] }));
 vi.mock("@/components/layout/app-config-modal", () => ({ AppConfigModal: () => null }));
+vi.mock("@/components/layout/login-prompt-modal", () => ({ LoginPromptModal: () => null }));
 vi.mock("@/components/layout/mobile-nav-drawer", () => ({ MobileNavDrawer: () => null }));
 vi.mock("@/components/layout/user-status-actions", () => ({ UserStatusActions: () => createElement("div", { "data-testid": "user-status-actions" }, "用户操作") }));
 vi.mock("@/stores/use-agent-store", () => ({ useAgentStore: (selector: (state: typeof agentState) => unknown) => selector(agentState) }));

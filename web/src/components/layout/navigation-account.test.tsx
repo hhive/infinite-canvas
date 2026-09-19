@@ -30,6 +30,7 @@ vi.mock("react-router-dom", () => ({
 }));
 
 vi.mock("@/components/layout/app-config-modal", () => ({ AppConfigModal: () => null }));
+vi.mock("@/components/layout/login-prompt-modal", () => ({ LoginPromptModal: () => null }));
 vi.mock("@/components/layout/mobile-nav-drawer", () => ({ MobileNavDrawer: () => null }));
 vi.mock("@/components/layout/user-status-actions", () => ({ UserStatusActions: () => null }));
 vi.mock("@/lib/utils", () => ({ cn: (...values: Array<string | false | undefined>) => values.filter(Boolean).join(" ") }));
