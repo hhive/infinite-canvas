@@ -100,8 +100,19 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     return <>{children}</>;
 }
 
+/**
+ * 不执行客户端根初始化的路径。
+ *
+ * 这些页面不涉及生成，匿名访客不应被弹出「配置模型渠道」对话框：
+ * 定价页是纯展示（见 f9a32c3）；用户配置页只做账号相关操作（API Key、用量、余额、兑换），
+ * 弹一个渠道配置框只会盖住登录引导。生成页（`/`、`/image`、`/video`、`/canvas`）保持原行为。
+ */
+const CLIENT_ROOT_INIT_EXCLUDED_EXACT = ["/pricing"];
+const CLIENT_ROOT_INIT_EXCLUDED_PREFIXES = ["/account"];
+
 export function shouldInitializeClientRoot(pathname: string): boolean {
-    return pathname !== "/pricing";
+    if (CLIENT_ROOT_INIT_EXCLUDED_EXACT.includes(pathname)) return false;
+    return !CLIENT_ROOT_INIT_EXCLUDED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 export function cookieSessionReadiness(probeSucceeded: boolean, authenticationKey: string) {

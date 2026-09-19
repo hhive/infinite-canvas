@@ -10,6 +10,21 @@ describe("shouldInitializeClientRoot", () => {
         expect(shouldInitializeClientRoot("/image")).toBe(true);
     });
 
+    it("does not initialize API key prompts on user-center routes", () => {
+        // 用户配置页只做账号操作；匿名访客应看到登录引导，而不是盖在上面的渠道配置框。
+        expect(shouldInitializeClientRoot("/account")).toBe(false);
+        expect(shouldInitializeClientRoot("/account/keys")).toBe(false);
+        expect(shouldInitializeClientRoot("/account/usage")).toBe(false);
+        expect(shouldInitializeClientRoot("/account/balance")).toBe(false);
+        expect(shouldInitializeClientRoot("/account/redeem")).toBe(false);
+        // 段边界：同前缀的其它路径不享受豁免。
+        expect(shouldInitializeClientRoot("/accounts")).toBe(true);
+        // 生成页与页面配置页保持原行为。
+        expect(shouldInitializeClientRoot("/video")).toBe(true);
+        expect(shouldInitializeClientRoot("/canvas")).toBe(true);
+        expect(shouldInitializeClientRoot("/config")).toBe(true);
+    });
+
     it("keeps restored video models when the generic image model request finishes later", () => {
         const videoModel = { id: 9, mediaType: "video" as const, model: "seedance-video", displayName: "Seedance", providerName: "Provider", apiMode: "videos", priceQuota: 0 };
         const config = {
