@@ -345,9 +345,10 @@ describe("ModelsPage", () => {
 });
 
 describe("qualityText", () => {
-    it("orders tiers like the config: upscale, low, medium, high", () => {
-        // 后端返回的是并集且按字母序，展示需重排为配置档位顺序。
-        expect(qualityText(["high", "low", "medium", "upscale"])).toBe("upscale / low / medium / high");
+    it("orders tiers like the config and shows upscale as the client-facing auto", () => {
+        // 后端返回并集且按字母序；展示需重排为配置档位顺序，
+        // 且 upscale 是内部档位——客户端触发超分是传 auto，故按客户端取值显示。
+        expect(qualityText(["high", "low", "medium", "upscale"])).toBe("auto / low / medium / high");
     });
 
     it("keeps the previous order for tiers without upscale", () => {
