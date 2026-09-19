@@ -153,6 +153,8 @@ type ConfigStore = {
     isConfigOpen: boolean;
     /** 凭据提示弹窗：登录 / 去创建 Key；null 表示未打开。 */
     credentialPrompt: "login" | "createKey" | null;
+    /** 会话 Key 绑定是否在途（由 use-media-api-key-store 推入）。在途时就绪判定 fail-open。 */
+    keySwitchInFlight: boolean;
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     cookieSessionReady: boolean;
@@ -292,6 +294,7 @@ export const useConfigStore = create<ConfigStore>()(
             webdav: defaultWebdavSyncConfig,
             isConfigOpen: false,
             credentialPrompt: null as "login" | "createKey" | null,
+            keySwitchInFlight: false,
             configTab: "channels",
             shouldPromptContinue: false,
             cookieSessionReady: false,
@@ -320,11 +323,16 @@ export const useConfigStore = create<ConfigStore>()(
                     },
                 })),
             // hasApiKey 现取：activate() 绑定 Key 后它才为真，用页面加载时的快照会误拦。
-            // 会话状态尚未加载完时不断言（fail-open）——刚进页面就点生成的用户不该在
-            // 这个窗口里被拦住；加载失败同样按未加载处理，退回改动前的行为。
+            //
+            // 只在「明确知道会话没有可用 Key」时才判不就绪；三种「还不知道」一律 fail-open
+            // （退回改动前的行为，最坏不差于现状，而误拦是用户可见的坏体验）：
+            //   - 会话状态尚未加载完（loaded=false）
+            //   - 会话状态读取失败（loadFailed，此时 hasApiKey 是未知而非已知为假）
+            //   - Key 正在被切换（绑定已在途，hasApiKey 尚未跟上）
             isAiConfigReady: (config, model) => {
                 const session = useSessionStore.getState();
-                const sessionKeyReady = get().cookieSessionReady && (!session.loaded || session.hasApiKey);
+                const settled = session.loaded && !session.loadFailed;
+                const sessionKeyReady = get().cookieSessionReady && (!settled || get().keySwitchInFlight || session.hasApiKey);
                 return isAiConfigReady(config, model, sessionKeyReady);
             },
             setCookieSessionReady: (cookieSessionReady) => set({ cookieSessionReady }),

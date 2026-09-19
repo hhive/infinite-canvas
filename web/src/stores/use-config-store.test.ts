@@ -16,6 +16,8 @@ beforeEach(() => {
         mediaModelErrors: { image: "", video: "", text: "" },
         mediaModelsRefreshedAt: { image: "", video: "", text: "" },
         cookieSessionReady: false,
+        keySwitchInFlight: false,
+        credentialPrompt: null,
     });
 });
 
@@ -224,6 +226,23 @@ describe("isAiConfigReady 的会话模式判定", () => {
         const manual = { ...sessionConfig, channels: sessionConfig.channels.map((channel) => ({ ...channel, apiKey: "sk-manual" })) };
 
         expect(useConfigStore.getState().isAiConfigReady(manual, "gpt-image-2")).toBe(true);
+    });
+
+    it("会话读取失败时 fail-open：hasApiKey 是未知而非已知为假", () => {
+        // 一次 5xx 会把 hasApiKey=false 缓存住；若按「已知无 Key」处理，
+        // 本可生成的会话会被拦到刷新为止（评审 F2）。
+        useConfigStore.setState({ cookieSessionReady: true });
+        useSessionStore.setState({ loaded: true, loadFailed: true, hasApiKey: false });
+
+        expect(useConfigStore.getState().isAiConfigReady(sessionConfig, "gpt-image-2")).toBe(true);
+    });
+
+    it("Key 绑定在途时 fail-open，避免刚进工作台就吃到假提示", () => {
+        // activate() 的 POST+GET 两个 RTT 内 hasApiKey 还没跟上（评审 F4）。
+        useConfigStore.setState({ cookieSessionReady: true, keySwitchInFlight: true });
+        useSessionStore.setState({ loaded: true, loadFailed: false, hasApiKey: false });
+
+        expect(useConfigStore.getState().isAiConfigReady(sessionConfig, "gpt-image-2")).toBe(true);
     });
 
     it("会话状态尚未加载完时不断言，避免刚进页面就点生成被误拦", () => {

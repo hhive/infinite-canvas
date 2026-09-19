@@ -10,9 +10,8 @@ import { AccountSessionGate } from "@/pages/account/components/session-gate";
 import { useAccountResource } from "@/pages/account/components/use-account-resource";
 import { formatAmount, formatTime, maskAPIKey } from "@/pages/account/format";
 import { apiErrorMessage } from "@/services/api/request";
-import { switchMediaAPIKey } from "@/services/api/media-api-keys";
 import { createAPIKey, deleteAPIKey, fetchAPIKeys, fetchAvailableGroups, updateAPIKey, type APIKey } from "@/services/api/user-center";
-import { ensureMediaAPIKeysLoaded, resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
+import { bindSessionAPIKey, ensureMediaAPIKeysLoaded, resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
 
 const PAGE_SIZE = 10;
 
@@ -52,7 +51,9 @@ function AccountKeys() {
     const switchTo = async (key: APIKey) => {
         setSwitchingId(key.id);
         try {
-            await switchMediaAPIKey(key.id);
+            // 走与生成页选择器共用的绑定入口：它会在绑定后刷新会话状态，
+            // 否则 hasApiKey 停在旧值，回工作台时刚启用的 Key 会被就绪判定误拦。
+            await bindSessionAPIKey(key.id);
             // 生成页按 Key 缓存模型目录，切换后必须让它们重新加载
             resetMediaAPIKeyStore();
             await ensureMediaAPIKeysLoaded();

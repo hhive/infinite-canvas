@@ -75,6 +75,27 @@ export const useMediaAPIKeyStore = create<MediaAPIKeyStore>()((set, get) => ({
 }));
 
 /**
+ * 把 Key 绑到媒体会话上，并刷新前端会话状态。
+ *
+ * 用户中心「设为当前」与生成页选择器共用这一个入口 —— 两处都必须刷新，否则 `hasApiKey`
+ * 会停在旧值，而它参与就绪判定，会让刚启用 Key 的用户被误拦。用户中心那条路径尤其隐蔽：
+ * 回工作台时服务端已是 current，`activate()` 会因 `candidate.id === currentKeyId` 提前
+ * return，不会补上这次刷新（只有整页刷新才恢复）。
+ *
+ * 绑定在途时把 `keySwitchInFlight` 推给 config store，让就绪判定在这个窗口 fail-open，
+ * 免得刚进工作台就点生成的用户吃一次假提示。
+ */
+export async function bindSessionAPIKey(apiKeyId: number): Promise<void> {
+    useConfigStore.setState({ keySwitchInFlight: true });
+    try {
+        await switchMediaAPIKey(apiKeyId);
+        await refreshSession();
+    } finally {
+        useConfigStore.setState({ keySwitchInFlight: false });
+    }
+}
+
+/**
  * 只加载 Key 列表，不切换会话：复用 {@link ensureLoaded}，不调用 select/activate，也不发送切换请求。
  * 文本重试需要在构造尝试序列前拿到 Key 列表，否则 store 未加载时 Key 维度整条失效。
  * 永不抛错：加载失败只影响 Key 维度的重试，调用方按当前会话 Key 照常生成。
@@ -112,13 +133,10 @@ async function switchKey(apiKeyId: number, capability: MediaCapability, manual: 
     let serverSwitched = false;
     try {
         // Serialize mutation requests so model refresh always observes the final selected key.
-        const mutation = switchMutationQueue.then(() => switchMediaAPIKey(apiKeyId));
+        const mutation = switchMutationQueue.then(() => bindSessionAPIKey(apiKeyId));
         switchMutationQueue = mutation.catch(() => undefined);
         await mutation;
         serverSwitched = true;
-        // 服务端会话已绑定新 Key，同步前端会话状态：`hasApiKey` 参与「就绪」判定，
-        // 不刷新的话刚被 activate() 自动绑定 Key 的用户会被自己的陈旧状态拦住。
-        void refreshSession();
         if (sequence !== requestSequence) return;
         // 文本目录与图片/视频并行刷新，但失败不参与回滚：文本模型权限由 Sub2API 在调用时校验，
         // 且 Media 的 text 目录在上游失败时按接口契约返回 502，不应因此把图片/视频的 Key 切换一起判失败。
@@ -142,10 +160,8 @@ async function switchKey(apiKeyId: number, capability: MediaCapability, manual: 
     } catch (error) {
         if (sequence !== requestSequence) return;
         if (serverSwitched && !controller.signal.aborted && before.currentKeyId && before.currentKeyId !== apiKeyId) {
-            try { await switchMediaAPIKey(before.currentKeyId); } catch { /* The next request revalidates the server session. */ }
+            try { await bindSessionAPIKey(before.currentKeyId); } catch { /* The next request revalidates the server session. */ }
         }
-        // 服务端 Key 状态可能已变（切换成功后又回滚），同样让会话状态跟上。
-        if (serverSwitched) void refreshSession();
         set({ status: "ready", error: errorText(error, "切换 API Key 失败") });
     }
 }

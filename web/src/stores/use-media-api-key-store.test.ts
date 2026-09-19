@@ -18,7 +18,7 @@ vi.mock(import("@/stores/use-session-store"), async (importOriginal) => {
 });
 
 import { useConfigStore } from "@/stores/use-config-store";
-import { currentMediaModelRequestEpoch, ensureMediaAPIKeysLoaded, ensureMediaModelsLoaded, isMediaModelRequestEpochCurrent, resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
+import { bindSessionAPIKey, currentMediaModelRequestEpoch, ensureMediaAPIKeysLoaded, ensureMediaModelsLoaded, isMediaModelRequestEpochCurrent, resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
 
 const emptyMediaModels = { image: [], video: [], text: [] };
 
@@ -131,6 +131,29 @@ describe("Media API Key session selection", () => {
 
         expect(switchMediaAPIKey).toHaveBeenCalledWith(30);
         expect(refreshSession).toHaveBeenCalled();
+    });
+
+    it("绑定入口刷新会话状态，并在途时置 keySwitchInFlight", async () => {
+        // 用户中心「设为当前」与生成页选择器共用这个入口（评审 F1）：漏刷会让刚启用 Key
+        // 的用户回工作台时被就绪判定误拦，且只有整页刷新才恢复。
+        const inflight: boolean[] = [];
+        const unsubscribe = useConfigStore.subscribe((state) => inflight.push(state.keySwitchInFlight));
+
+        await bindSessionAPIKey(30);
+        unsubscribe();
+
+        expect(switchMediaAPIKey).toHaveBeenCalledWith(30);
+        expect(refreshSession).toHaveBeenCalled();
+        expect(inflight).toContain(true);
+        expect(useConfigStore.getState().keySwitchInFlight).toBe(false);
+    });
+
+    it("绑定失败时同样复位在途标记", async () => {
+        switchMediaAPIKey.mockRejectedValueOnce(new Error("绑定失败"));
+
+        await expect(bindSessionAPIKey(30)).rejects.toThrow("绑定失败");
+
+        expect(useConfigStore.getState().keySwitchInFlight).toBe(false);
     });
 
     it("服务端切换本身失败时不刷新会话状态", async () => {

@@ -9,6 +9,12 @@ type SessionStore = {
     user: SessionUser | null;
     hasSession: boolean;
     loaded: boolean;
+    /**
+     * 读取会话失败（网络/5xx）。此时 `loaded` 仍为 true（界面要退出 loading），
+     * 但 `hasApiKey` 是「未知」而非「已知为假」——就绪判定必须据此 fail-open，
+     * 否则一次抖动会把本可生成的会话永久拦到刷新为止。
+     */
+    loadFailed: boolean;
     reload: () => Promise<void>;
     clear: () => void;
 };
@@ -25,6 +31,7 @@ const initialState = {
     user: null as SessionUser | null,
     hasSession: false,
     loaded: false,
+    loadFailed: false,
 };
 
 export const useSessionStore = create<SessionStore>()((set) => ({
@@ -44,10 +51,11 @@ export function ensureSessionLoaded(): Promise<void> {
     if (!loadPromise) {
         loadPromise = fetchSessionState()
             .then((session) => {
-                useSessionStore.setState({ authSource: session.authSource, hasApiKey: session.hasApiKey, user: session.user, hasSession: session.authSource !== null || session.user !== null, loaded: true });
+                useSessionStore.setState({ authSource: session.authSource, hasApiKey: session.hasApiKey, user: session.user, hasSession: session.authSource !== null || session.user !== null, loaded: true, loadFailed: false });
             })
             .catch(() => {
-                useSessionStore.setState({ ...initialState, loaded: true });
+                // loaded 置真让界面退出 loading，但 loadFailed 标记「这些字段是未知的」。
+                useSessionStore.setState({ ...initialState, loaded: true, loadFailed: true });
             });
     }
     return loadPromise;
