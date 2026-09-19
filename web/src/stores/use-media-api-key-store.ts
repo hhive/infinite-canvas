@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { fetchMediaAPIKeys, mediaAPIKeyCapabilityCount, switchMediaAPIKey, type MediaAPIKey } from "@/services/api/media-api-keys";
 import { fetchMediaModels, type MediaCapability, type MediaModel } from "@/services/api/media-models";
 import { useConfigStore } from "@/stores/use-config-store";
+import { refreshSession } from "@/stores/use-session-store";
 
 type MediaAPIKeyStore = {
     keys: MediaAPIKey[];
@@ -115,6 +116,9 @@ async function switchKey(apiKeyId: number, capability: MediaCapability, manual: 
         switchMutationQueue = mutation.catch(() => undefined);
         await mutation;
         serverSwitched = true;
+        // 服务端会话已绑定新 Key，同步前端会话状态：`hasApiKey` 参与「就绪」判定，
+        // 不刷新的话刚被 activate() 自动绑定 Key 的用户会被自己的陈旧状态拦住。
+        void refreshSession();
         if (sequence !== requestSequence) return;
         // 文本目录与图片/视频并行刷新，但失败不参与回滚：文本模型权限由 Sub2API 在调用时校验，
         // 且 Media 的 text 目录在上游失败时按接口契约返回 502，不应因此把图片/视频的 Key 切换一起判失败。
@@ -140,6 +144,8 @@ async function switchKey(apiKeyId: number, capability: MediaCapability, manual: 
         if (serverSwitched && !controller.signal.aborted && before.currentKeyId && before.currentKeyId !== apiKeyId) {
             try { await switchMediaAPIKey(before.currentKeyId); } catch { /* The next request revalidates the server session. */ }
         }
+        // 服务端 Key 状态可能已变（切换成功后又回滚），同样让会话状态跟上。
+        if (serverSwitched) void refreshSession();
         set({ status: "ready", error: errorText(error, "切换 API Key 失败") });
     }
 }

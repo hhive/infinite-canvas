@@ -50,30 +50,43 @@ describe("configured model capabilities", () => {
 });
 
 describe("cookie session readiness", () => {
-    it("accepts a verified cookie session without a persisted API key", () => {
+    const configWithoutKey = () => {
         const state = useConfigStore.getState();
-        const config = {
+        return {
             ...state.config,
             channels: state.config.channels.map((channel) => ({ ...channel, apiKey: "" })),
             model: "default::gpt-image-2",
         };
+    };
 
+    it("accepts a verified cookie session that has bound a usable key", () => {
         useConfigStore.setState({ cookieSessionReady: true });
+        useSessionStore.setState({ loaded: true, authSource: "password", hasApiKey: true });
 
-        expect(state.isAiConfigReady(config, config.model)).toBe(true);
+        const config = configWithoutKey();
+
+        expect(useConfigStore.getState().isAiConfigReady(config, config.model)).toBe(true);
+    });
+
+    it("does not accept a verified cookie session without a usable key", () => {
+        // 探测通过只说明会话 cookie 有效（withAPIUser 会回落到会话、不要求已绑定 Key）；
+        // 没有可用 Key 的会话点了生成只会在上游失败，不能算就绪。
+        useConfigStore.setState({ cookieSessionReady: true });
+        resetSessionStoreForTest();
+        useSessionStore.setState({ loaded: true });
+
+        const config = configWithoutKey();
+
+        expect(useConfigStore.getState().isAiConfigReady(config, config.model)).toBe(false);
     });
 
     it("does not accept an unverified cookie session without a persisted API key", () => {
-        const state = useConfigStore.getState();
-        const config = {
-            ...state.config,
-            channels: state.config.channels.map((channel) => ({ ...channel, apiKey: "" })),
-            model: "default::gpt-image-2",
-        };
-
         useConfigStore.setState({ cookieSessionReady: false });
+        useSessionStore.setState({ loaded: true, authSource: "password", hasApiKey: true });
 
-        expect(state.isAiConfigReady(config, config.model)).toBe(false);
+        const config = configWithoutKey();
+
+        expect(useConfigStore.getState().isAiConfigReady(config, config.model)).toBe(false);
     });
 });
 
@@ -166,6 +179,61 @@ describe("applyMediaModels", () => {
         useConfigStore.getState().applyMediaModels("text", [{ ...imageModel(43, "gpt-6-astra"), id: "gpt-6-astra", mediaType: "text" }]);
 
         expect(useConfigStore.getState().config.textModel).toBe("default::gpt-6-astra");
+    });
+});
+
+describe("isAiConfigReady 的会话模式判定", () => {
+    const sessionConfig = {
+        ...defaultConfig,
+        apiKey: "",
+        channels: defaultConfig.channels.map((channel) => ({ ...channel, apiKey: "" })),
+    };
+
+    it("会话模式但没有可用 Key 时不算就绪", () => {
+        // 探测通过只说明会话 cookie 有效（withAPIUser 会回落到会话、不要求已绑定 Key），
+        // 没有 Key 的会话点了生成只会在上游失败，所以不能算就绪。
+        useConfigStore.setState({ cookieSessionReady: true });
+        resetSessionStoreForTest();
+        useSessionStore.setState({ loaded: true });
+
+        expect(useConfigStore.getState().isAiConfigReady(sessionConfig, "gpt-image-2")).toBe(false);
+    });
+
+    it("会话绑定可用 Key 后算就绪", () => {
+        useConfigStore.setState({ cookieSessionReady: true });
+        useSessionStore.setState({ loaded: true, authSource: "password", hasApiKey: true });
+
+        expect(useConfigStore.getState().isAiConfigReady(sessionConfig, "gpt-image-2")).toBe(true);
+    });
+
+    it("现取 hasApiKey：加载后绑定 Key 无需重算 cookieSessionReady", () => {
+        // 页面加载时会话尚未绑定 Key（activate() 还没跑）；绑定完成后即应就绪，
+        // 否则刚被自动绑定 Key 的用户会被自己的陈旧状态拦住。
+        useConfigStore.setState({ cookieSessionReady: true });
+        resetSessionStoreForTest();
+        useSessionStore.setState({ loaded: true });
+        expect(useConfigStore.getState().isAiConfigReady(sessionConfig, "gpt-image-2")).toBe(false);
+
+        useSessionStore.setState({ authSource: "password", hasApiKey: true });
+        expect(useConfigStore.getState().isAiConfigReady(sessionConfig, "gpt-image-2")).toBe(true);
+    });
+
+    it("手填 Key 时不依赖会话状态", () => {
+        useConfigStore.setState({ cookieSessionReady: false });
+        resetSessionStoreForTest();
+        const manual = { ...sessionConfig, channels: sessionConfig.channels.map((channel) => ({ ...channel, apiKey: "sk-manual" })) };
+
+        expect(useConfigStore.getState().isAiConfigReady(manual, "gpt-image-2")).toBe(true);
+    });
+
+    it("会话状态尚未加载完时不断言，避免刚进页面就点生成被误拦", () => {
+        // hasApiKey 要等 /api/session/me 回来才准；这个窗口里 fail-open，
+        // 与被拦相比宁可退回改动前的行为。
+        useConfigStore.setState({ cookieSessionReady: true });
+        resetSessionStoreForTest();
+        useSessionStore.setState({ loaded: false, hasApiKey: false });
+
+        expect(useConfigStore.getState().isAiConfigReady(sessionConfig, "gpt-image-2")).toBe(true);
     });
 });
 

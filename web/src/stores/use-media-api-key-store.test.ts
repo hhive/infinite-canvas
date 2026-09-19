@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchMediaAPIKeys, fetchMediaModels, switchMediaAPIKey } = vi.hoisted(() => ({
+const { fetchMediaAPIKeys, fetchMediaModels, switchMediaAPIKey, refreshSession } = vi.hoisted(() => ({
     fetchMediaAPIKeys: vi.fn(),
     fetchMediaModels: vi.fn(),
     switchMediaAPIKey: vi.fn(),
+    refreshSession: vi.fn(),
 }));
 
 vi.mock(import("@/services/api/media-api-keys"), async (importOriginal) => {
@@ -11,6 +12,10 @@ vi.mock(import("@/services/api/media-api-keys"), async (importOriginal) => {
     return { ...actual, fetchMediaAPIKeys, switchMediaAPIKey };
 });
 vi.mock("@/services/api/media-models", () => ({ fetchMediaModels }));
+vi.mock(import("@/stores/use-session-store"), async (importOriginal) => {
+    const actual = await importOriginal();
+    return { ...actual, refreshSession };
+});
 
 import { useConfigStore } from "@/stores/use-config-store";
 import { currentMediaModelRequestEpoch, ensureMediaAPIKeysLoaded, ensureMediaModelsLoaded, isMediaModelRequestEpochCurrent, resetMediaAPIKeyStore, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
@@ -118,6 +123,22 @@ describe("Media API Key session selection", () => {
         // 切换已回滚，失败 Key 的文本目录不能再写进配置
         expect(fetchMediaModels.mock.calls.some(([capability]) => capability === "text")).toBe(true);
         expect(useConfigStore.getState().mediaModels.text).toEqual([]);
+    });
+
+    it("刷新会话状态，让新绑定的 Key 参与就绪判定", async () => {
+        // hasApiKey 参与「就绪」判定；切换成功后不刷新，用户会被自己的陈旧状态拦住。
+        await useMediaAPIKeyStore.getState().select(30, "image");
+
+        expect(switchMediaAPIKey).toHaveBeenCalledWith(30);
+        expect(refreshSession).toHaveBeenCalled();
+    });
+
+    it("服务端切换本身失败时不刷新会话状态", async () => {
+        switchMediaAPIKey.mockRejectedValueOnce(new Error("切换失败"));
+
+        await useMediaAPIKeyStore.getState().select(30, "image");
+
+        expect(refreshSession).not.toHaveBeenCalled();
     });
 
     it("accepts only the latest rapid manual selection result", async () => {

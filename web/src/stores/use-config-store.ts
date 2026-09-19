@@ -244,9 +244,17 @@ export function resolveModelScript(config: AiConfig, value: string) {
     return findChannelModel(config, value)?.model.script?.trim() || "";
 }
 
-function isAiConfigReady(config: AiConfig, model: string, cookieSessionReady = false) {
+/**
+ * `sessionKeyReady` 表示「走会话模式（没有手填 Key）且会话已绑定可用 API Key」。
+ *
+ * 注意不能只看探测是否通过：`withAPIUser` 在无 Bearer 时回落到会话、**不要求会话已绑定 Key**，
+ * 所以「有会话但零可用 Key」的用户探测也会通过，点了生成才在上游失败。因此这里必须一并
+ * 要求 `hasApiKey`，而且要在**调用时现取** —— 工作台的 `activate()` 会在进入后自动绑定 Key，
+ * 页面加载时算出的布尔量会过期。
+ */
+function isAiConfigReady(config: AiConfig, model: string, sessionKeyReady = false) {
     const channel = resolveModelChannel(config, model);
-    return Boolean(model.trim() && channel.baseUrl.trim() && (channel.apiKey.trim() || cookieSessionReady));
+    return Boolean(model.trim() && channel.baseUrl.trim() && (channel.apiKey.trim() || sessionKeyReady));
 }
 
 /** 用户是否手填过 Key（顶层 apiKey 或任一渠道的 apiKey）。 */
@@ -311,7 +319,14 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
-            isAiConfigReady: (config, model) => isAiConfigReady(config, model, get().cookieSessionReady),
+            // hasApiKey 现取：activate() 绑定 Key 后它才为真，用页面加载时的快照会误拦。
+            // 会话状态尚未加载完时不断言（fail-open）——刚进页面就点生成的用户不该在
+            // 这个窗口里被拦住；加载失败同样按未加载处理，退回改动前的行为。
+            isAiConfigReady: (config, model) => {
+                const session = useSessionStore.getState();
+                const sessionKeyReady = get().cookieSessionReady && (!session.loaded || session.hasApiKey);
+                return isAiConfigReady(config, model, sessionKeyReady);
+            },
             setCookieSessionReady: (cookieSessionReady) => set({ cookieSessionReady }),
             openConfigDialog: (shouldPromptContinue = false, configTab = "channels") => {
                 // shouldPromptContinue=true 表示「生成流程因缺少配置/Key 被打断」：调用点全部来自

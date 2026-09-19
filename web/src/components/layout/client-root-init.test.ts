@@ -99,9 +99,12 @@ describe("mergeFetchedChannelModels", () => {
 });
 
 describe("cookieSessionReadiness", () => {
-    it("accepts only a successful probe without a bearer key", () => {
+    it("marks session mode only for a successful probe without a bearer key", () => {
         expect(cookieSessionReadiness(true, "")).toBe(true);
         expect(cookieSessionReadiness(true, "sk-manual")).toBe(false);
         expect(cookieSessionReadiness(false, "")).toBe(false);
     });
+
+    // 「会话是否已绑定可用 Key」不在这里判定：activate() 会在进入工作台后自动绑定 Key，
+    // 加载时的快照会过期。该项由 isAiConfigReady 在调用时现取 hasApiKey（见 use-config-store 测试）。
 });

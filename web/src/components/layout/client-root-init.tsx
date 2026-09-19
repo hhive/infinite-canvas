@@ -72,7 +72,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 if (!ready) {
                     // 只在「有凭据上下文却仍失败」时提示：显式给过的 Key 失效，或媒体会话已失效。
                     // 无凭据的匿名访客不弹框（首访打扰）。ensureSessionLoaded 单次读取且结果被缓存，
-                    // 只在失败分支里 await，正常路径不增加延迟。
+                    // 只在需要分诊的路径里 await。
                     // 只有生成页才在入口自动提示；/config 是配置页本身，不弹。
                     if (shouldPromptOnEntry(window.location.pathname)) {
                         await ensureSessionLoaded().catch(() => undefined);
@@ -176,6 +176,13 @@ export function configPromptForProbeFailure(authenticationKey: string, hasSessio
     return resolveMissingKeyPrompt(authenticationKey.trim() !== "", hasSession, hasApiKey);
 }
 
+/**
+ * 「会话模式」：探测通过且用户没有手填 Key —— 生成将使用会话绑定的 Key。
+ *
+ * 注意这只说明会话 cookie 有效，**不代表会话已绑定可用的 API Key**（`withAPIUser` 在无 Bearer
+ * 时回落到会话、不要求已绑定 Key）。「有没有可用 Key」由 `isAiConfigReady` 在调用时现取
+ * `hasApiKey` 判定：工作台的 `activate()` 会在进入后自动绑定 Key，页面加载时的快照会过期。
+ */
 export function cookieSessionReadiness(probeSucceeded: boolean, authenticationKey: string) {
     return probeSucceeded && !authenticationKey.trim();
 }
