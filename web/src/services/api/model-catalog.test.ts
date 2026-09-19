@@ -26,4 +26,18 @@ describe("imagePricingRows", () => {
         ]);
         expect(imagePricingRows({ media_type: "image", name: "gpt-image-2", sizes: ["1k"], qualities: ["low"], price_1k: 0.03, price_2k: 0.07, price_4k: 0.1, price_low: 0.03, price_medium: 0.07, price_high: 0.1, calls: [] })).toEqual([{ label: "1K", price: 0.03 }, { label: "低", price: 0.03 }]);
     });
+
+    it("puts the upscale tier first among quality prices", () => {
+        expect(imagePricingRows({ media_type: "image", name: "gpt-image-2", sizes: ["1k"], qualities: ["low", "medium", "high", "upscale"], price_1k: 0.03, price_upscale: 0.02, price_low: 0.03, price_medium: 0.07, price_high: 0.1, calls: [] })).toEqual([
+            { label: "1K", price: 0.03 },
+            { label: "超分", price: 0.02 },
+            { label: "低", price: 0.03 },
+            { label: "中", price: 0.07 },
+            { label: "高", price: 0.1 },
+        ]);
+    });
+
+    it("omits the upscale row for models that do not declare it", () => {
+        expect(imagePricingRows({ media_type: "image", name: "gpt-image-2", sizes: ["1k"], qualities: ["low"], price_1k: 0.03, price_upscale: 0.02, price_low: 0.03, calls: [] })).toEqual([{ label: "1K", price: 0.03 }, { label: "低", price: 0.03 }]);
+    });
 });

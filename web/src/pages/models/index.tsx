@@ -9,7 +9,7 @@ function money(value?: number) {
 }
 
 const resolutionLabels = new Set(["1K", "2K", "4K"]);
-const qualityLabels = new Set(["低", "中", "高"]);
+const qualityLabels = new Set(["超分", "低", "中", "高"]);
 
 function priceText(model: MarketplaceModel, labels: Set<string>) {
     return imagePricingRows(model)

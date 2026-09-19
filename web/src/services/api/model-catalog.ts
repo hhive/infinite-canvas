@@ -14,6 +14,7 @@ export type MarketplaceModel = {
     price_1k?: number;
     price_2k?: number;
     price_4k?: number;
+    price_upscale?: number;
     price_low?: number;
     price_medium?: number;
     price_high?: number;
@@ -42,6 +43,7 @@ export function imagePricingRows(model: MarketplaceModel) {
         ...(sizes.has("1k") ? [{ label: "1K", price: model.price_1k }] : []),
         ...(sizes.has("2k") ? [{ label: "2K", price: model.price_2k }] : []),
         ...(sizes.has("4k") ? [{ label: "4K", price: model.price_4k }] : []),
+        ...(qualities.has("upscale") ? [{ label: "超分", price: model.price_upscale }] : []),
         ...(qualities.has("low") ? [{ label: "低", price: model.price_low }] : []),
         ...(qualities.has("medium") ? [{ label: "中", price: model.price_medium }] : []),
         ...(qualities.has("high") ? [{ label: "高", price: model.price_high }] : []),
