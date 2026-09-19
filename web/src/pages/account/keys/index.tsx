@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { App, Button, Form, Input, Modal, Popconfirm, Select, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Plus } from "lucide-react";
+import { Copy, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { AccountErrorState, AccountPanel } from "@/pages/account/components/panel";
 import { AccountSessionGate } from "@/pages/account/components/session-gate";
 import { useAccountResource } from "@/pages/account/components/use-account-resource";
-import { formatAmount, formatTime } from "@/pages/account/format";
+import { formatAmount, formatTime, maskAPIKey } from "@/pages/account/format";
 import { apiErrorMessage } from "@/services/api/request";
 import { switchMediaAPIKey } from "@/services/api/media-api-keys";
 import { createAPIKey, deleteAPIKey, fetchAPIKeys, fetchAvailableGroups, updateAPIKey, type APIKey } from "@/services/api/user-center";
@@ -92,6 +92,16 @@ function AccountKeys() {
         }
     };
 
+    // 列表只展示打码值（与 Sub2API 面板一致），完整明文仅通过复制交给用户。
+    const copyKey = async (key: APIKey) => {
+        try {
+            await navigator.clipboard.writeText(key.key);
+            message.success(t("account.keysCopySuccess"));
+        } catch {
+            message.error(t("account.keysCopyFailed"));
+        }
+    };
+
     const statusText = (status: APIKey["status"]) =>
         ({ active: t("account.keysStatusActive"), inactive: t("account.keysStatusInactive"), quota_exhausted: t("account.keysStatusQuotaExhausted"), expired: t("account.keysStatusExpired") })[status] ?? status;
 
@@ -102,12 +112,22 @@ function AccountKeys() {
             title: t("account.keysName"),
             dataIndex: "name",
             render: (_, key) => (
-                <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-stone-950 dark:text-stone-100">{key.name}</span>
-                        {key.id === currentKeyId ? <Tag color="blue">{t("account.keysCurrent")}</Tag> : null}
-                    </div>
-                    <code className="mt-0.5 block break-all text-xs text-stone-500 dark:text-stone-400">{key.key}</code>
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-stone-950 dark:text-stone-100">{key.name}</span>
+                    {key.id === currentKeyId ? <Tag color="blue">{t("account.keysCurrent")}</Tag> : null}
+                </div>
+            ),
+        },
+        {
+            title: t("account.keysKey"),
+            dataIndex: "key",
+            width: 230,
+            render: (_, key) => (
+                <div className="flex items-center gap-1">
+                    <code className="break-all text-xs text-stone-500 dark:text-stone-400">{maskAPIKey(key.key)}</code>
+                    <Button type="text" size="small" aria-label={t("account.keysCopy")} title={t("account.keysCopy")} onClick={() => void copyKey(key)}>
+                        <Copy className="size-3.5" />
+                    </Button>
                 </div>
             ),
         },
@@ -119,8 +139,10 @@ function AccountKeys() {
             width: 140,
             render: (_, key) => (key.quota > 0 ? <span className="tabular-nums">{`${formatAmount(key.quota_used)} / ${formatAmount(key.quota)}`}</span> : <span className="text-stone-500 dark:text-stone-400">{t("account.keysUnlimited")}</span>),
         },
+        { title: t("account.keysExpiresAt"), dataIndex: "expires_at", width: 160, render: (value: string | null) => <span className="text-stone-500 dark:text-stone-400">{value ? formatTime(value) : t("account.keysNeverExpires")}</span> },
         { title: t("account.keysCreatedAt"), dataIndex: "created_at", width: 160, render: (value: string) => <span className="text-stone-500 dark:text-stone-400">{formatTime(value)}</span> },
         { title: t("account.keysLastUsedAt"), dataIndex: "last_used_at", width: 160, render: (value: string | null) => <span className="text-stone-500 dark:text-stone-400">{value ? formatTime(value) : t("account.keysNever")}</span> },
+        { title: t("account.keysLastUsedIp"), dataIndex: "last_used_ip", width: 140, render: (value: string | null | undefined) => <span className="text-stone-500 dark:text-stone-400">{value || "-"}</span> },
         {
             title: "",
             key: "actions",

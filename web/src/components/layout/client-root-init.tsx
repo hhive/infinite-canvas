@@ -68,7 +68,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
             .then((ready) => {
                 setCookieSessionReady(cookieSessionReadiness(ready, authenticationKey));
                 if (!ready) {
-                    openConfigDialog(false);
+                    // 无凭据的匿名访客不弹框（首访打扰）；只有用户显式提供过 Key 却仍失败时才提示。
+                    if (shouldAutoOpenConfigDialog(ready, authenticationKey)) openConfigDialog(false);
                     return;
                 }
                 return fetchChannelModels(channel);
@@ -101,18 +102,32 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
 }
 
 /**
- * 不执行客户端根初始化的路径。
+ * 需要执行客户端根初始化的页面：生成页 + 配置页。
  *
- * 这些页面不涉及生成，匿名访客不应被弹出「配置模型渠道」对话框：
- * 定价页是纯展示（见 f9a32c3）；用户配置页只做账号相关操作（API Key、用量、余额、兑换），
- * 弹一个渠道配置框只会盖住登录引导。生成页（`/`、`/image`、`/video`、`/canvas`）保持原行为。
+ * 用允许名单而不是拒绝名单。此前是「排除 /pricing 与 /account」的拒绝名单，后果是
+ * 每新增一个路由都会默认继承初始化（以及其中的自动弹框），`/account` 只能靠事后补例外。
+ * 允许名单下新增路由默认不初始化，需要时显式加入。
+ *
+ * `/config` 必须在名单内：配置面板的模型选项来自 `applyMediaModels` 写入的媒体模型目录，
+ * 而该目录只在根初始化里拉取（`fetchMediaModels` 循环在探测链之外，不受自动弹框门限影响）。
+ * `/prompts` 不需要：提示词来源由 `usePromptSourceScheduler()` 独立驱动，与模型目录无关。
+ * 定价页是纯展示（见 f9a32c3）；用户配置页只做账号操作（API Key、用量、余额、兑换）。
  */
-const CLIENT_ROOT_INIT_EXCLUDED_EXACT = ["/pricing"];
-const CLIENT_ROOT_INIT_EXCLUDED_PREFIXES = ["/account"];
+const CLIENT_ROOT_INIT_ROUTES = new Set(["/", "/image", "/video", "/canvas", "/config"]);
 
 export function shouldInitializeClientRoot(pathname: string): boolean {
-    if (CLIENT_ROOT_INIT_EXCLUDED_EXACT.includes(pathname)) return false;
-    return !CLIENT_ROOT_INIT_EXCLUDED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+    return CLIENT_ROOT_INIT_ROUTES.has(pathname);
+}
+
+/**
+ * 探测失败时是否自动弹「配置模型渠道」对话框。
+ *
+ * 探测失败（`/api/me` 返回 401/403，见 `probeImageSession`）只说明「当前没有可用凭据」，
+ * 无凭据的匿名访客本就处于这个状态，首访即弹一个渠道配置框是打扰而非帮助。
+ * 只有**用户显式提供了 Key 却仍然失败**时，弹框才是有效提示（告诉他这把 Key 不可用）。
+ */
+export function shouldAutoOpenConfigDialog(probeReady: boolean, authenticationKey: string): boolean {
+    return !probeReady && authenticationKey.trim() !== "";
 }
 
 export function cookieSessionReadiness(probeSucceeded: boolean, authenticationKey: string) {

@@ -46,6 +46,7 @@ export type APIKey = {
     quota_used: number;
     expires_at: string | null;
     last_used_at: string | null;
+    last_used_ip?: string | null;
     created_at: string;
     group?: APIKeyGroup;
 };
@@ -73,20 +74,51 @@ export type BalanceCredit = {
     created_at: string;
 };
 
+export type UsageKeyRef = { id: number; name: string };
+export type UsageGroupRef = { id: number; name: string };
+
 export type UsageLog = {
     id: number;
     request_id: string;
     api_key_id: number;
+    api_key?: UsageKeyRef | null;
+    group?: UsageGroupRef | null;
     model: string;
     inbound_endpoint?: string | null;
+    reasoning_effort?: string | null;
+    ip_address?: string | null;
     billing_mode?: string | null;
+    request_type?: string | null;
+    stream?: boolean;
+    first_token_ms?: number | null;
     input_tokens: number;
     output_tokens: number;
+    cache_creation_tokens?: number;
+    cache_read_tokens?: number;
     total_cost: number;
     actual_cost: number;
     image_count?: number;
     duration_ms: number | null;
     created_at: string;
+};
+
+/**
+ * 单条记录的 Token 总数口径与 Sub2API 一致：输入 + 输出 + 缓存创建 + 缓存读取。
+ *
+ * 用户端 DTO 没有 `total_tokens` 字段（见 `backend/internal/handler/dto/types.go` 的 UsageLog），
+ * 必须在这里求和；口径与 `/usage/*` 统计端点使用的定义相同，否则表格与统计卡会互相矛盾。
+ */
+export function usageLogTotalTokens(log: Pick<UsageLog, "input_tokens" | "output_tokens" | "cache_creation_tokens" | "cache_read_tokens">) {
+    return (log.input_tokens || 0) + (log.output_tokens || 0) + (log.cache_creation_tokens || 0) + (log.cache_read_tokens || 0);
+}
+
+/** `/usage/stats` 的响应，字段与 Sub2API 面板统计卡同源。 */
+export type UsageStats = {
+    total_requests: number;
+    total_tokens: number;
+    total_cost: number;
+    total_actual_cost: number;
+    average_duration_ms: number;
 };
 
 export type UsageQuery = {
@@ -110,14 +142,6 @@ export type DashboardStats = {
     today_tokens: number;
     today_cost: number;
     today_actual_cost: number;
-};
-
-export type TrendPoint = {
-    date: string;
-    requests: number;
-    total_tokens: number;
-    cost: number;
-    actual_cost: number;
 };
 
 export type ModelStat = {
@@ -182,12 +206,13 @@ export async function fetchDashboardStats(signal?: AbortSignal) {
     return get<DashboardStats>("/usage/dashboard/stats", { signal });
 }
 
-export async function fetchDashboardTrend(params: { start_date?: string; end_date?: string; timezone?: string }, signal?: AbortSignal) {
-    return get<{ trend: TrendPoint[]; start_date: string; end_date: string }>("/usage/dashboard/trend", { params, signal });
+/** 使用记录页统计卡：与 Sub2API 面板同用 `/usage/stats`（随日期范围与筛选变化）。 */
+export async function fetchUsageStats(query: UsageQuery, signal?: AbortSignal) {
+    return get<UsageStats>("/usage/stats", { params: query, signal });
 }
 
-export async function fetchDashboardModels(params: { start_date?: string; end_date?: string; timezone?: string }, signal?: AbortSignal) {
-    return get<{ models: ModelStat[] }>("/usage/dashboard/models", { params, signal });
+export async function fetchDashboardModels(query: UsageQuery, signal?: AbortSignal) {
+    return get<{ models: ModelStat[] }>("/usage/dashboard/models", { params: query, signal });
 }
 
 export async function redeemCode(code: string) {
