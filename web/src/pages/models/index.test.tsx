@@ -39,7 +39,7 @@ vi.mock("lucide-react", () => ({
     Search: () => createElement("span"),
 }));
 
-import ModelsPage, { expandMarketplaceModels } from "@/pages/models";
+import ModelsPage, { expandMarketplaceModels, qualityText } from "@/pages/models";
 import type { MarketplaceResponse } from "@/services/api/model-catalog";
 
 let container: HTMLDivElement;
@@ -341,5 +341,21 @@ describe("ModelsPage", () => {
         expect(fetchModelCatalog).toHaveBeenCalledTimes(2);
         expect(container.textContent).toContain("模型广场暂未开放");
         expect(container.textContent).not.toContain("模型广场加载失败");
+    });
+});
+
+describe("qualityText", () => {
+    it("orders tiers like the config: upscale, low, medium, high", () => {
+        // 后端返回的是并集且按字母序，展示需重排为配置档位顺序。
+        expect(qualityText(["high", "low", "medium", "upscale"])).toBe("upscale / low / medium / high");
+    });
+
+    it("keeps the previous order for tiers without upscale", () => {
+        expect(qualityText(["low", "high"])).toBe("low / high");
+        expect(qualityText(["medium", "low"])).toBe("low / medium");
+    });
+
+    it("appends unknown tiers last without reordering them", () => {
+        expect(qualityText(["custom", "high", "another"])).toBe("high / custom / another");
     });
 });

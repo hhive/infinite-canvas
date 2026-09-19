@@ -10,6 +10,16 @@ function money(value?: number) {
 
 const resolutionLabels = new Set(["1K", "2K", "4K"]);
 const qualityLabels = new Set(["超分", "低", "中", "高"]);
+// 后端 qualities 是各配置的并集且按字母序排列（high / low / medium / upscale），
+// 展示统一按配置档位顺序：超分 → 低 → 中 → 高。未识别的取值排在最后并保持相对顺序。
+const qualityOrder = ["upscale", "low", "medium", "high"];
+export function qualityText(qualities: string[]) {
+    return [...qualities].sort((left, right) => qualityRank(left) - qualityRank(right)).join(" / ");
+}
+function qualityRank(value: string) {
+    const index = qualityOrder.indexOf(value);
+    return index < 0 ? qualityOrder.length : index;
+}
 
 function priceText(model: MarketplaceModel, labels: Set<string>) {
     return imagePricingRows(model)
@@ -115,7 +125,7 @@ function ImageModelDetails({ model, fields }: { model: MarketplaceModel; fields:
     return (
         <div className="mb-3 space-y-1 text-xs text-stone-500">
             {fields.includes("sizes") && model.sizes?.length ? <div>尺寸：{model.sizes.join(" / ")}</div> : null}
-            {fields.includes("qualities") && model.qualities?.length ? <div>质量：{model.qualities.join(" / ")}</div> : null}
+            {fields.includes("qualities") && model.qualities?.length ? <div>质量：{qualityText(model.qualities)}</div> : null}
             {fields.includes("prices") && resolutionPrice ? <div>分辨率价格：{resolutionPrice}</div> : null}
             {fields.includes("prices") && qualityPrice ? <div>质量价格：{qualityPrice}</div> : null}
             {fields.includes("prices") && resolutionPrice && qualityPrice ? <div>分辨率和质量同时传入时，按两者中较高价格计费。</div> : null}
