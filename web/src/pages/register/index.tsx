@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { App, Button, Input, Result, Spin } from "antd";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { AuthShell } from "@/components/auth/auth-shell";
 import { CaptchaField, type CaptchaHandle } from "@/components/auth/captcha-field";
 import { usePublicSettings } from "@/hooks/use-public-settings";
+import { safeRedirect } from "@/lib/safe-redirect";
 import { apiErrorMessage } from "@/services/api/request";
 import { register, sendVerifyCode, type CaptchaPayload } from "@/services/api/session";
 import { refreshSession } from "@/stores/use-session-store";
@@ -17,6 +18,9 @@ export default function RegisterPage() {
     const { message } = App.useApp();
     const { t } = useTranslation();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    // 与登录页一样消费 redirect：从 /account/keys 来的用户注册完应该回到原页，而不是被丢到概览。
+    const redirectTo = safeRedirect(searchParams.get("redirect"));
     const { settings, error: settingsError, retry: retrySettings } = usePublicSettings();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -84,7 +88,7 @@ export default function RegisterPage() {
             });
             await refreshSession();
             message.success(t("auth.registerSuccess"));
-            navigate("/account", { replace: true });
+            navigate(redirectTo, { replace: true });
         } catch (error) {
             if (!verifyCodeUsed) captcha.current?.reset();
             message.error(apiErrorMessage(error, t("auth.registerFailed"), t("common.networkError")));

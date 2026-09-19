@@ -151,7 +151,8 @@ type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
     isConfigOpen: boolean;
-    isLoginPromptOpen: boolean;
+    /** 凭据提示弹窗：登录 / 去创建 Key；null 表示未打开。 */
+    credentialPrompt: "login" | "createKey" | null;
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     cookieSessionReady: boolean;
@@ -164,9 +165,13 @@ type ConfigStore = {
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     setCookieSessionReady: (ready: boolean) => void;
-    openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
-    openLoginPrompt: () => void;
-    setLoginPromptOpen: (isOpen: boolean) => void;
+    /**
+     * `shouldPromptContinue=true` 时返回实际打开的提示种类：调用方据此决定要不要再补一句
+     * 文案（登录提示自身已说明动作，再叠一句「请先完成配置」会与之矛盾）。
+     */
+    openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => MissingKeyPrompt;
+    openCredentialPrompt: (kind: "login" | "createKey") => void;
+    closeCredentialPrompt: () => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
     clearAPIKeys: () => void;
@@ -256,8 +261,20 @@ function hasManualAPIKey(config: AiConfig) {
  * 给渠道配置框；两者都没有的访客（典型是匿名首访）Key 只能由账号提供，应该给**登录提示**——
  * 丢一个渠道配置框给他既看不懂也走不通。
  */
-export function resolveMissingKeyPrompt(manualKeyPresent: boolean, hasSession: boolean): "login" | "config" {
-    return manualKeyPresent || hasSession ? "config" : "login";
+/** 「用到 Key 却没有可用 Key」时的三种去处。 */
+export type MissingKeyPrompt = "login" | "createKey" | "config";
+
+/**
+ * 按凭据上下文分诊：
+ * - 手填过 Key → 渠道配置框（补救路径是修 Key）；
+ * - 没有会话 → **登录提示**（Key 只能由账号提供）；
+ * - 有会话但没有绑定可用 Key → **去创建 API Key**（这类用户点生成才会失败，应在入口引导）；
+ * - 有会话且有 Key → 渠道配置框（凭据坏了，补救路径是重配 / 重登）。
+ */
+export function resolveMissingKeyPrompt(manualKeyPresent: boolean, hasSession: boolean, hasApiKey: boolean): MissingKeyPrompt {
+    if (manualKeyPresent) return "config";
+    if (!hasSession) return "login";
+    return hasApiKey ? "config" : "createKey";
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -266,7 +283,7 @@ export const useConfigStore = create<ConfigStore>()(
             config: defaultConfig,
             webdav: defaultWebdavSyncConfig,
             isConfigOpen: false,
-            isLoginPromptOpen: false,
+            credentialPrompt: null as "login" | "createKey" | null,
             configTab: "channels",
             shouldPromptContinue: false,
             cookieSessionReady: false,
@@ -302,14 +319,19 @@ export const useConfigStore = create<ConfigStore>()(
                 // 这类打断按凭据上下文分诊：既没手填 Key 也没有媒体会话的访客，Key 只能由账号提供，
                 // 应该去登录／注册，而不是拿到一个对他走不通的渠道配置框。
                 // shouldPromptContinue=false 是用户的显式意图（顶栏「系统配置」），永远开配置框。
-                if (shouldPromptContinue && resolveMissingKeyPrompt(hasManualAPIKey(get().config), useSessionStore.getState().authSource !== null) === "login") {
-                    set({ isLoginPromptOpen: true });
-                    return;
+                if (shouldPromptContinue) {
+                    const session = useSessionStore.getState();
+                    const kind = resolveMissingKeyPrompt(hasManualAPIKey(get().config), session.authSource !== null, session.hasApiKey);
+                    if (kind !== "config") {
+                        set({ credentialPrompt: kind });
+                        return kind;
+                    }
                 }
                 set({ isConfigOpen: true, shouldPromptContinue, configTab });
+                return "config";
             },
-            openLoginPrompt: () => set({ isLoginPromptOpen: true }),
-            setLoginPromptOpen: (isLoginPromptOpen) => set({ isLoginPromptOpen }),
+            openCredentialPrompt: (credentialPrompt) => set({ credentialPrompt }),
+            closeCredentialPrompt: () => set({ credentialPrompt: null }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
             clearAPIKeys: () => set((state) => ({ config: { ...state.config, apiKey: "", channels: state.config.channels.map((channel) => ({ ...channel, apiKey: "" })) } })),

@@ -18,6 +18,11 @@ export type SessionUser = {
 
 export type SessionState = {
     authSource: SessionAuthSource | null;
+    /**
+     * 会话是否已绑定一个可用的 API Key（后端 `has_api_key`，即 `api_key_id > 0`）。
+     * 用于「有账号但没有可用 Key」的分诊：这类用户点了生成才会失败，应在入口就引导去建 Key。
+     */
+    hasApiKey: boolean;
     user: SessionUser | null;
 };
 
@@ -99,6 +104,7 @@ export function parseSessionState(payload: unknown): SessionState {
     const id = Number(body.user_id);
     return {
         authSource: authSource === "launch" || authSource === "password" ? authSource : null,
+        hasApiKey: body.has_api_key === true,
         user:
             Number.isSafeInteger(id) && id > 0
                 ? {

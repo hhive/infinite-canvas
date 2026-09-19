@@ -49,7 +49,7 @@ export function AccountLoginGuide({ launch }: { launch: boolean }) {
                 <Link to={`/login?redirect=${redirectTo}`}>
                     <Button type="primary">{t("account.goLogin")}</Button>
                 </Link>
-                <Link to="/register">
+                <Link to={`/register?redirect=${redirectTo}`}>
                     <Button>{t("account.goRegister")}</Button>
                 </Link>
             </div>

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { MediaModel } from "@/services/api/media-models";
 import { defaultConfig, resolveMissingKeyPrompt, resolveModelForCapability, useConfigStore } from "@/stores/use-config-store";
-import { resetSessionStoreForTest } from "@/stores/use-session-store";
+import { resetSessionStoreForTest, useSessionStore } from "@/stores/use-session-store";
 
 beforeEach(() => {
     useConfigStore.setState({
@@ -174,46 +174,64 @@ describe("missing-key prompt triage", () => {
         useConfigStore.setState({
             config: { ...defaultConfig, apiKey: "", channels: defaultConfig.channels.map((channel) => ({ ...channel, apiKey: "" })) },
             isConfigOpen: false,
-            isLoginPromptOpen: false,
+            credentialPrompt: null,
         });
     };
 
-    it("resolveMissingKeyPrompt offers login only when there is no credential context", () => {
-        expect(resolveMissingKeyPrompt(false, false)).toBe("login");
-        expect(resolveMissingKeyPrompt(true, false)).toBe("config");
-        expect(resolveMissingKeyPrompt(false, true)).toBe("config");
-        expect(resolveMissingKeyPrompt(true, true)).toBe("config");
+    it("offers login only when there is neither a key nor a session", () => {
+        expect(resolveMissingKeyPrompt(false, false, false)).toBe("login");
     });
 
-    it("routes the missing-key interruption to the login prompt for visitors with no credential", () => {
+    it("offers creating a key when a session has no usable key", () => {
+        expect(resolveMissingKeyPrompt(false, true, false)).toBe("createKey");
+    });
+
+    it("offers the config dialog when a key was supplied or the session has one", () => {
+        expect(resolveMissingKeyPrompt(true, false, false)).toBe("config");
+        expect(resolveMissingKeyPrompt(false, true, true)).toBe("config");
+        expect(resolveMissingKeyPrompt(true, true, false)).toBe("config");
+    });
+
+    it("routes the interruption to the login prompt for visitors with no credential", () => {
         clearManualKeys();
         resetSessionStoreForTest();
 
-        useConfigStore.getState().openConfigDialog(true);
+        // 返回值让调用方知道开的是哪一种，才能只在「配置框」分支补文案。
+        expect(useConfigStore.getState().openConfigDialog(true)).toBe("login");
 
-        expect(useConfigStore.getState().isLoginPromptOpen).toBe(true);
+        expect(useConfigStore.getState().credentialPrompt).toBe("login");
+        expect(useConfigStore.getState().isConfigOpen).toBe(false);
+    });
+
+    it("routes the interruption to the create-key prompt for a session without a key", () => {
+        clearManualKeys();
+        useSessionStore.setState({ authSource: "password", hasApiKey: false });
+
+        expect(useConfigStore.getState().openConfigDialog(true)).toBe("createKey");
+
+        expect(useConfigStore.getState().credentialPrompt).toBe("createKey");
         expect(useConfigStore.getState().isConfigOpen).toBe(false);
     });
 
     it("keeps the config dialog when the visitor hand-filled a key", () => {
-        // beforeEach 已写入手填 Key；这类人的补救路径是修 Key，不是登录。
-        useConfigStore.setState({ isConfigOpen: false, isLoginPromptOpen: false });
+        // beforeEach 已写入手填 Key；这类人的补救路径是修 Key，不是登录或建新 Key。
+        useConfigStore.setState({ isConfigOpen: false, credentialPrompt: null });
         resetSessionStoreForTest();
 
-        useConfigStore.getState().openConfigDialog(true);
+        expect(useConfigStore.getState().openConfigDialog(true)).toBe("config");
 
         expect(useConfigStore.getState().isConfigOpen).toBe(true);
-        expect(useConfigStore.getState().isLoginPromptOpen).toBe(false);
+        expect(useConfigStore.getState().credentialPrompt).toBe(null);
     });
 
     it("keeps the config dialog for explicit intent even with no credential", () => {
-        // 顶栏「系统配置」是用户显式意图，永远开配置框，不做登录分诊。
+        // 顶栏「系统配置」是用户显式意图，永远开配置框，不做分诊。
         clearManualKeys();
         resetSessionStoreForTest();
 
-        useConfigStore.getState().openConfigDialog(false);
+        expect(useConfigStore.getState().openConfigDialog(false)).toBe("config");
 
         expect(useConfigStore.getState().isConfigOpen).toBe(true);
-        expect(useConfigStore.getState().isLoginPromptOpen).toBe(false);
+        expect(useConfigStore.getState().credentialPrompt).toBe(null);
     });
 });

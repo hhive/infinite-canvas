@@ -66,6 +66,14 @@ describe("AccountSessionGate", () => {
         expect(loginLink?.getAttribute("href")).toBe("/login?redirect=%2Faccount%2Fkeys");
     });
 
+    it("offers a register link that returns to the current account page", () => {
+        // 注册同样要带回跳：此前只有登录链接带 redirect，注册完会被丢到概览而不是原页。
+        renderAccountRoute();
+
+        const registerLink = Array.from(container.querySelectorAll("a")).find((link) => link.textContent === "注册账号");
+        expect(registerLink?.getAttribute("href")).toBe("/register?redirect=%2Faccount%2Fkeys");
+    });
+
     it("keeps the guide for launch sessions instead of blocking them", () => {
         session.authSource = "launch";
         renderAccountRoute();

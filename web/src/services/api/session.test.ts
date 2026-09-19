@@ -15,6 +15,7 @@ describe("fetchSessionState", () => {
 
         expect(await fetchSessionState()).toEqual({
             authSource: "password",
+            hasApiKey: true,
             user: { id: 42, email: "u@example.com", username: "阿蒙", role: "user" },
         });
     });
@@ -22,13 +23,14 @@ describe("fetchSessionState", () => {
     it("keeps a launch identity without inventing a user when the id is missing", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: { auth_source: "launch", user_id: 0 } });
 
-        expect(await fetchSessionState()).toEqual({ authSource: "launch", user: null });
+        // 没有 has_api_key 字段时按「无可用 Key」处理，入口据此引导去创建。
+        expect(await fetchSessionState()).toEqual({ authSource: "launch", hasApiKey: false, user: null });
     });
 
     it("treats an unrecognized auth_source as no session", async () => {
         vi.mocked(axios.get).mockResolvedValueOnce({ data: { auth_source: "cookie" } });
 
-        expect(await fetchSessionState()).toEqual({ authSource: null, user: null });
+        expect(await fetchSessionState()).toEqual({ authSource: null, hasApiKey: false, user: null });
     });
 });
 

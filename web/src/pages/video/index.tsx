@@ -225,8 +225,7 @@ export default function VideoPage() {
             return null;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
-            openConfigDialog(true);
+            if (openConfigDialog(true) === "config") message.warning("请先完成配置");
             return null;
         }
         const videoReferenceError = seedanceVideoReferenceError(videoReferences);

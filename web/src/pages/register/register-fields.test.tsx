@@ -13,6 +13,8 @@ const state = vi.hoisted(() => ({
     settings: null as PublicSettings | null,
     sendVerifyCode: vi.fn(),
     error: vi.fn(),
+    navigate: vi.fn(),
+    searchParams: new URLSearchParams(),
 }));
 
 vi.mock("@/hooks/use-public-settings", () => ({
@@ -30,7 +32,8 @@ vi.mock("@/services/api/session", () => ({
 
 vi.mock("react-router-dom", () => ({
     Link: ({ children, to, ...props }: ComponentProps<"a"> & { to: string }) => createElement("a", { ...props, href: to }, children),
-    useNavigate: () => vi.fn(),
+    useNavigate: () => state.navigate,
+    useSearchParams: () => [state.searchParams],
 }));
 
 vi.mock("antd", () => {
@@ -61,8 +64,11 @@ afterEach(() => {
     container.remove();
 });
 
-function render(overrides: Partial<PublicSettings>) {
+function render(overrides: Partial<PublicSettings>, query = "") {
     state.settings = { ...parsePublicSettings({}), ...overrides };
+    // 每次渲染都重置 query 与导航记录，避免用例间互相污染。
+    state.searchParams = new URLSearchParams(query);
+    state.navigate.mockClear();
     act(() => root.render(createElement(RegisterPage)));
 }
 

@@ -225,8 +225,8 @@ export default function ImagePage() {
             return;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
-            openConfigDialog(true);
+            // 登录提示自身已说明该做什么；只有真的打开渠道配置框时才补这句，避免两句指令互相矛盾。
+            if (openConfigDialog(true) === "config") message.warning("请先完成配置");
             return;
         }
 
@@ -375,8 +375,7 @@ export default function ImagePage() {
             return null;
         }
         if (!isAiConfigReady(effectiveConfig, model)) {
-            message.warning("请先完成配置");
-            openConfigDialog(true);
+            if (openConfigDialog(true) === "config") message.warning("请先完成配置");
             return null;
         }
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };

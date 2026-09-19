@@ -20,7 +20,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const config = useConfigStore((state) => state.config);
     const importChannelCredentials = useConfigStore((state) => state.importChannelCredentials);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const openLoginPrompt = useConfigStore((state) => state.openLoginPrompt);
+    const openCredentialPrompt = useConfigStore((state) => state.openCredentialPrompt);
     const clearAPIKeys = useConfigStore((state) => state.clearAPIKeys);
     const setCookieSessionReady = useConfigStore((state) => state.setCookieSessionReady);
     const applyMediaModels = useConfigStore((state) => state.applyMediaModels);
@@ -73,11 +73,22 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     // 只在「有凭据上下文却仍失败」时提示：显式给过的 Key 失效，或媒体会话已失效。
                     // 无凭据的匿名访客不弹框（首访打扰）。ensureSessionLoaded 单次读取且结果被缓存，
                     // 只在失败分支里 await，正常路径不增加延迟。
-                    await ensureSessionLoaded().catch(() => undefined);
-                    const hasSession = useSessionStore.getState().authSource !== null;
-                    if (configPromptForProbeFailure(authenticationKey, hasSession) === "login") openLoginPrompt();
-                    else openConfigDialog(false);
+                    // 只有生成页才在入口自动提示；/config 是配置页本身，不弹。
+                    if (shouldPromptOnEntry(window.location.pathname)) {
+                        await ensureSessionLoaded().catch(() => undefined);
+                        const session = useSessionStore.getState();
+                        const kind = configPromptForProbeFailure(authenticationKey, session.authSource !== null, session.hasApiKey);
+                        if (kind === "config") openConfigDialog(false);
+                        else openCredentialPrompt(kind);
+                    }
                     return;
+                }
+                // 会话可用但没有绑定可用 Key（新建账号的典型状态）：点生成才会失败，
+                // 因此入口就引导去创建 / 选择。手填过 Key 的用户不需要。
+                if (!authenticationKey.trim() && shouldPromptOnEntry(window.location.pathname)) {
+                    await ensureSessionLoaded().catch(() => undefined);
+                    const session = useSessionStore.getState();
+                    if (session.authSource !== null && !session.hasApiKey) openCredentialPrompt("createKey");
                 }
                 return fetchChannelModels(channel);
             })
@@ -103,7 +114,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     setMediaModelsError(capability, error instanceof Error ? error.message : "读取媒体模型失败", status === 401);
                 });
         }
-    }, [applyMediaModels, clearAPIKeys, config.channels, importChannelCredentials, message, openConfigDialog, openLoginPrompt, setCookieSessionReady, setMediaModelsError, setMediaModelsLoading, t, updateConfig]);
+    }, [applyMediaModels, clearAPIKeys, config.channels, importChannelCredentials, message, openConfigDialog, openCredentialPrompt, setCookieSessionReady, setMediaModelsError, setMediaModelsLoading, t, updateConfig]);
 
     return <>{children}</>;
 }
@@ -134,6 +145,20 @@ export function shouldInitializeClientRoot(pathname: string): boolean {
 }
 
 /**
+ * 入口自动提示（登录提示 / 渠道配置框）只发生在生成页。
+ *
+ * `/config` 虽然需要初始化（拉媒体模型目录），但它**本身就是配置页**：用户来这儿就是为了
+ * 手填 Key 或配渠道，再弹一个「请先登录」既自相矛盾，也违背「不做全局登录墙、手填 Key 可生成」。
+ * 因此提示与初始化用两份名单。
+ */
+const ENTRY_PROMPT_ROUTES = new Set(["/", "/image", "/video", "/canvas"]);
+
+export function shouldPromptOnEntry(pathname: string): boolean {
+    if (ENTRY_PROMPT_ROUTES.has(pathname)) return true;
+    return CLIENT_ROOT_INIT_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+/**
  * 探测失败时给哪一种提示。
  *
  * 探测失败（`/api/me` 返回 401/403，见 `probeImageSession`）说明「当前没有可用凭据」。
@@ -141,8 +166,8 @@ export function shouldInitializeClientRoot(pathname: string): boolean {
  *   - 手填过 Key 或存在媒体会话 → 渠道配置框（他们的补救路径是修 Key / 进用户中心）；
  *   - 两者都没有（典型是匿名首访）→ **登录提示**，因为 Key 只能由账号提供。
  */
-export function configPromptForProbeFailure(authenticationKey: string, hasSession: boolean): "login" | "config" {
-    return resolveMissingKeyPrompt(authenticationKey.trim() !== "", hasSession);
+export function configPromptForProbeFailure(authenticationKey: string, hasSession: boolean, hasApiKey: boolean) {
+    return resolveMissingKeyPrompt(authenticationKey.trim() !== "", hasSession, hasApiKey);
 }
 
 export function cookieSessionReadiness(probeSucceeded: boolean, authenticationKey: string) {

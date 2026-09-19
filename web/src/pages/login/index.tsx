@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { CaptchaField, type CaptchaHandle } from "@/components/auth/captcha-field";
 import { usePublicSettings } from "@/hooks/use-public-settings";
+import { safeRedirect } from "@/lib/safe-redirect";
 import { apiErrorMessage } from "@/services/api/request";
 import { login as loginRequest, loginWithTotp, type PendingLogin } from "@/services/api/session";
 import { ensureSessionLoaded, refreshSession, useSessionStore } from "@/stores/use-session-store";
@@ -162,8 +163,3 @@ export default function LoginPage() {
     );
 }
 
-/** 只接受站内绝对路径，避免 redirect 参数被用作开放跳转。 */
-export function safeRedirect(value: string | null) {
-    const target = (value ?? "").trim();
-    return target.startsWith("/") && !target.startsWith("//") ? target : "/account";
-}

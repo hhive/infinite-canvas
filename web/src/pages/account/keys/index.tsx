@@ -75,6 +75,8 @@ function AccountKeys() {
                 await updateAPIKey(dialog.key.id, { name: values.name.trim(), group_id: values.group_id ?? null, status: values.status ?? "active" });
                 message.success(t("account.keysUpdateSuccess"));
             }
+            // 新建 / 编辑后同步生成页的 Key 列表，否则回到工作台选不到刚建的 Key。
+            await refreshMediaKeyStore();
             setDialog(null);
             list.reload();
         } catch (error) {
@@ -88,12 +90,26 @@ function AccountKeys() {
         try {
             await deleteAPIKey(key.id);
             message.success(t("account.keysDeleteSuccess"));
+            // 删除同样要让生成页重新取列表（被删的可能是生成页当前选中的那把）。
+            await refreshMediaKeyStore();
             // 删除最后一页最后一条时回退一页，避免停在空页
             if (list.data && list.data.items.length === 1 && page > 1) setPage((value) => value - 1);
             else list.reload();
         } catch (error) {
             message.error(apiErrorMessage(error, t("account.keysDeleteFailed"), t("common.networkError")));
         }
+    };
+
+    /**
+     * 失效并重载生成页的 Key 列表缓存。
+     *
+     * `useMediaAPIKeyStore` 的 `ensureLoaded` 在 `status !== "idle"` 时直接返回缓存、永不重取，
+     * 因此在这里增删改 Key 之后必须显式失效：否则用户回到工作台仍是旧的「无 Key」状态，
+     * 选不到刚建的 Key（刷新页面才恢复，表现为时好时坏）。
+     */
+    const refreshMediaKeyStore = async () => {
+        resetMediaAPIKeyStore();
+        await ensureMediaAPIKeysLoaded();
     };
 
     const statusText = (status: APIKey["status"]) =>

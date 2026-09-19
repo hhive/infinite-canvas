@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { configPromptForProbeFailure, cookieSessionReadiness, mergeFetchedChannelModels, shouldInitializeClientRoot } from "@/components/layout/client-root-init";
+import { configPromptForProbeFailure, cookieSessionReadiness, mergeFetchedChannelModels, shouldInitializeClientRoot, shouldPromptOnEntry } from "@/components/layout/client-root-init";
 import { defaultConfig, selectableModelsByCapability } from "@/stores/use-config-store";
 
 describe("shouldInitializeClientRoot", () => {
@@ -42,19 +42,40 @@ describe("shouldInitializeClientRoot", () => {
     });
 });
 
+describe("shouldPromptOnEntry", () => {
+    it("prompts on generation routes", () => {
+        expect(shouldPromptOnEntry("/")).toBe(true);
+        expect(shouldPromptOnEntry("/image")).toBe(true);
+        expect(shouldPromptOnEntry("/video")).toBe(true);
+        expect(shouldPromptOnEntry("/canvas")).toBe(true);
+        expect(shouldPromptOnEntry("/canvas/abc123")).toBe(true);
+    });
+
+    it("never prompts on the config page", () => {
+        // /config 本身就是配置页：用户来这儿就是为了手填 Key 或配渠道，
+        // 再弹「请先登录」既自相矛盾，也违背「手填 Key 可生成」。
+        expect(shouldPromptOnEntry("/config")).toBe(false);
+    });
+});
+
 describe("configPromptForProbeFailure", () => {
     it("offers login when the visitor has neither a key nor a session", () => {
         // 「用到 Key 却没有 Key」且连账号都没有：Key 只能由账号提供，给登录提示，
         // 而不是丢一个匿名访客看不懂也走不通的渠道配置框。
-        expect(configPromptForProbeFailure("", false)).toBe("login");
-        expect(configPromptForProbeFailure("   ", false)).toBe("login");
+        expect(configPromptForProbeFailure("", false, false)).toBe("login");
+        expect(configPromptForProbeFailure("   ", false, false)).toBe("login");
     });
 
-    it("offers the config dialog when a key was supplied or a session exists", () => {
-        // 这两类人的补救路径是修 Key 或进用户中心，不是登录。
-        expect(configPromptForProbeFailure("sk-explicit-and-invalid", false)).toBe("config");
-        expect(configPromptForProbeFailure("", true)).toBe("config");
-        expect(configPromptForProbeFailure("sk-explicit", true)).toBe("config");
+    it("offers creating a key when a session exists without a usable key", () => {
+        // 新建账号的典型状态：有会话但没绑定可用 Key。这类用户点生成才会失败，入口就该引导去创建。
+        expect(configPromptForProbeFailure("", true, false)).toBe("createKey");
+    });
+
+    it("offers the config dialog when a key was supplied or the session has one", () => {
+        // 这几类人的补救路径是修 Key 或进用户中心，不是登录、也不是去建新 Key。
+        expect(configPromptForProbeFailure("sk-explicit-and-invalid", false, false)).toBe("config");
+        expect(configPromptForProbeFailure("", true, true)).toBe("config");
+        expect(configPromptForProbeFailure("sk-explicit", true, false)).toBe("config");
     });
 });
 

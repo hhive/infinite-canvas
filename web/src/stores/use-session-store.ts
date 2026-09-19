@@ -4,6 +4,8 @@ import { fetchSessionState, type SessionAuthSource, type SessionUser } from "@/s
 
 type SessionStore = {
     authSource: SessionAuthSource | null;
+    /** 会话是否已绑定可用 API Key；有账号但没有 Key 的用户需要在入口被引导去创建。 */
+    hasApiKey: boolean;
     user: SessionUser | null;
     hasSession: boolean;
     loaded: boolean;
@@ -19,6 +21,7 @@ let loadPromise: Promise<void> | null = null;
  */
 const initialState = {
     authSource: null as SessionAuthSource | null,
+    hasApiKey: false,
     user: null as SessionUser | null,
     hasSession: false,
     loaded: false,
@@ -41,7 +44,7 @@ export function ensureSessionLoaded(): Promise<void> {
     if (!loadPromise) {
         loadPromise = fetchSessionState()
             .then((session) => {
-                useSessionStore.setState({ authSource: session.authSource, user: session.user, hasSession: session.authSource !== null || session.user !== null, loaded: true });
+                useSessionStore.setState({ authSource: session.authSource, hasApiKey: session.hasApiKey, user: session.user, hasSession: session.authSource !== null || session.user !== null, loaded: true });
             })
             .catch(() => {
                 useSessionStore.setState({ ...initialState, loaded: true });
