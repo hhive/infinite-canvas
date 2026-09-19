@@ -71,11 +71,15 @@ describe("configPromptForProbeFailure", () => {
         expect(configPromptForProbeFailure("", true, false)).toBe("createKey");
     });
 
-    it("offers the config dialog when a key was supplied or the session has one", () => {
-        // 这几类人的补救路径是修 Key 或进用户中心，不是登录、也不是去建新 Key。
+    it("offers the config dialog only when a key was hand-filled", () => {
+        // 手填 Key 是唯一该看到渠道配置框的场景：补救路径就是改渠道 / 换 Key。
         expect(configPromptForProbeFailure("sk-explicit-and-invalid", false, false)).toBe("config");
-        expect(configPromptForProbeFailure("", true, true)).toBe("config");
         expect(configPromptForProbeFailure("sk-explicit", true, false)).toBe("config");
+    });
+
+    it("offers login when a session has a key that the probe still rejected", () => {
+        // 账号带 Key 的用户不该被弹渠道配置框（线上实测反馈），补救路径是重新登录。
+        expect(configPromptForProbeFailure("", true, true)).toBe("login");
     });
 });
 

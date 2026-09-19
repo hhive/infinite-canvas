@@ -104,6 +104,12 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 if (apiKey) message.success(t("config.importedDirectConfig"));
             })
             .catch((error) => {
+                // 探测本身失败（5xx/超时等，非 401/403）时**无法判定**凭据是否可用。
+                // 此前这里什么都不写，cookieSessionReady 会停在默认 false → 就绪判定为假 →
+                // 点生成落进「有会话且有 Key」那一支 → 弹渠道配置框。而对「Key 来自登录账号」
+                // 的用户，渠道配置框不是他的补救路径。改为按会话模式放行，由 hasApiKey 决定；
+                // 真有问题由服务端在生成时给出真实错误。
+                setCookieSessionReady(cookieSessionReadiness(true, authenticationKey));
                 message.error(error instanceof Error ? error.message : "读取模型失败");
             });
         const requestId = ++mediaRequest.current;

@@ -276,15 +276,18 @@ export type MissingKeyPrompt = "login" | "createKey" | "config";
 
 /**
  * 按凭据上下文分诊：
- * - 手填过 Key → 渠道配置框（补救路径是修 Key）；
- * - 没有会话 → **登录提示**（Key 只能由账号提供）；
- * - 有会话但没有绑定可用 Key → **去创建 API Key**（这类用户点生成才会失败，应在入口引导）；
- * - 有会话且有 Key → 渠道配置框（凭据坏了，补救路径是重配 / 重登）。
+ * - 手填过 Key → 渠道配置框（**唯一**该看到它的场景：补救路径就是改渠道 / 换 Key）；
+ * - 没有会话 → 登录提示（Key 只能由账号提供）；
+ * - 有会话但没有绑定可用 Key → 去创建 / 选择 API Key；
+ * - 有会话且有 Key 但凭据仍被拒 → 登录提示（会话或 Key 已失效，重新登录是补救路径）。
+ *
+ * **「有会话」的用户一律不给渠道配置框**：他的 Key 由账号提供，渠道配置对他没有意义。
+ * 线上实测反馈：账号带 Key 的用户点生图被弹「配置与用户偏好」——那正是这条分支的旧行为。
  */
 export function resolveMissingKeyPrompt(manualKeyPresent: boolean, hasSession: boolean, hasApiKey: boolean): MissingKeyPrompt {
     if (manualKeyPresent) return "config";
     if (!hasSession) return "login";
-    return hasApiKey ? "config" : "createKey";
+    return hasApiKey ? "login" : "createKey";
 }
 
 export const useConfigStore = create<ConfigStore>()(

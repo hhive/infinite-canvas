@@ -273,10 +273,14 @@ describe("missing-key prompt triage", () => {
         expect(resolveMissingKeyPrompt(false, true, false)).toBe("createKey");
     });
 
-    it("offers the config dialog when a key was supplied or the session has one", () => {
+    it("offers the config dialog only when a key was hand-filled", () => {
+        // 有会话的用户一律不给渠道配置框：他的 Key 由账号提供，渠道配置对他没有意义。
         expect(resolveMissingKeyPrompt(true, false, false)).toBe("config");
-        expect(resolveMissingKeyPrompt(false, true, true)).toBe("config");
         expect(resolveMissingKeyPrompt(true, true, false)).toBe("config");
+    });
+
+    it("offers login when a session has a key that was still rejected", () => {
+        expect(resolveMissingKeyPrompt(false, true, true)).toBe("login");
     });
 
     it("routes the interruption to the login prompt for visitors with no credential", () => {
