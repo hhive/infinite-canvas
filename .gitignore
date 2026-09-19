@@ -15,3 +15,5 @@ web/public/plugins
 plugins/canvas/*/dist
 plugins/canvas/*/node_modules
 web/public/plugins
+# playwright-cli 的运行产物（快照、控制台日志），非项目文件
+.playwright-cli/
