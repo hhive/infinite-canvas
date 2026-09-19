@@ -719,7 +719,7 @@ export default {
         goLogin: "Log in",
         goRegister: "Sign up",
         keyRequired: "No API key available yet",
-        keyRequiredHint: "Generation needs an API key. Create one in your account, or pick an existing key as the default for generation.",
+        keyRequiredHint: "Generation needs a usable API key. Create one in your account and give it a group that has available models — an ungrouped key has no usable models and will not be offered as a candidate.",
         goCreateKey: "Create an API key",
         loadFailed: "Failed to load",
         retry: "Retry",

@@ -7,7 +7,7 @@ import { createModelChannel, modelOptionsFromChannels, normalizeChannelModels, r
 import { fetchChannelModels, probeImageSession } from "@/services/api/image";
 import { fetchMediaModels, type MediaCapability } from "@/services/api/media-models";
 import { readImageLaunchParams, resolveImageLaunchAuthentication } from "@/lib/image-launch-params";
-import { currentMediaModelRequestEpoch, isMediaModelRequestEpochCurrent } from "@/stores/use-media-api-key-store";
+import { currentMediaModelRequestEpoch, ensureMediaAPIKeysLoaded, isMediaModelRequestEpochCurrent, useMediaAPIKeyStore } from "@/stores/use-media-api-key-store";
 import { ensureSessionLoaded, useSessionStore } from "@/stores/use-session-store";
 import { usePromptSourceScheduler } from "@/hooks/use-prompt-source-scheduler";
 
@@ -83,12 +83,18 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                     }
                     return;
                 }
-                // 会话可用但没有绑定可用 Key（新建账号的典型状态）：点生成才会失败，
-                // 因此入口就引导去创建 / 选择。手填过 Key 的用户不需要。
+                // 会话可用但没有绑定可用 Key（新建账号的典型状态）：点生成才会失败，入口就引导。
+                //
+                // 只在**一把 Key 都没有**时提示去创建：Key 必须有「有可用模型的分组」才可能被选中
+                // （未分组的 Key 模型数为 0），所以已有 Key 却仍不可用时再劝「去创建」只会让用户
+                // 原地打转。那种情况交给工作台自己的选择器提示与导航里的用户配置入口。
                 if (!authenticationKey.trim() && shouldPromptOnEntry(window.location.pathname)) {
                     await ensureSessionLoaded().catch(() => undefined);
                     const session = useSessionStore.getState();
-                    if (session.authSource !== null && !session.hasApiKey) openCredentialPrompt("createKey");
+                    if (session.authSource !== null && !session.hasApiKey) {
+                        await ensureMediaAPIKeysLoaded();
+                        if (useMediaAPIKeyStore.getState().status === "empty") openCredentialPrompt("createKey");
+                    }
                 }
                 return fetchChannelModels(channel);
             })

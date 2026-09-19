@@ -719,7 +719,7 @@ export default {
         goLogin: "去登录",
         goRegister: "注册账号",
         keyRequired: "还没有可用的 API Key",
-        keyRequiredHint: "生成任务需要一个 API Key。去用户配置新建一个，或选择已有的 Key 作为生成任务默认使用的 Key。",
+        keyRequiredHint: "生成任务需要一个可用的 API Key。去用户配置新建一个，并为它选择一个有可用模型的分组 —— 未分组的 Key 没有任何可用模型，工作台不会把它列为候选。",
         goCreateKey: "去创建 API Key",
         loadFailed: "加载失败",
         retry: "重试",
