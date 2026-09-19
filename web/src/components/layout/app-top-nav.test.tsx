@@ -27,11 +27,12 @@ vi.mock("react-router-dom", () => ({
     useLocation: () => ({ pathname: "/video" }),
 }));
 
-vi.mock("@/constant/navigation-tools", () => ({ navigationTools: [] }));
+vi.mock("@/constant/navigation-tools", () => ({ navigationTools: [], visibleNavigationTools: () => [] }));
 vi.mock("@/components/layout/app-config-modal", () => ({ AppConfigModal: () => null }));
 vi.mock("@/components/layout/mobile-nav-drawer", () => ({ MobileNavDrawer: () => null }));
 vi.mock("@/components/layout/user-status-actions", () => ({ UserStatusActions: () => createElement("div", { "data-testid": "user-status-actions" }, "用户操作") }));
 vi.mock("@/stores/use-agent-store", () => ({ useAgentStore: (selector: (state: typeof agentState) => unknown) => selector(agentState) }));
+vi.mock("@/stores/use-session-store", () => ({ useSessionStore: (selector: (state: { authSource: null }) => unknown) => selector({ authSource: null }), ensureSessionLoaded: vi.fn() }));
 vi.mock("@/stores/use-config-store", () => ({ useConfigStore: (selector: (state: { openConfigDialog: ReturnType<typeof vi.fn> }) => unknown) => selector({ openConfigDialog: vi.fn() }) }));
 vi.mock("lucide-react", () => ({
     Bot: () => createElement("span"),
