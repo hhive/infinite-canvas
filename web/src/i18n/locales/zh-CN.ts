@@ -333,7 +333,7 @@ export default {
         models: "模型广场",
         pricing: "模型广场",
         assets: "我的资产",
-        account: "用户配置",
+        account: "用户中心",
         config: "系统配置",
     },
     topNav: {
@@ -708,7 +708,7 @@ export default {
         settingsFailed: "读取站点配置失败，请刷新页面重试",
     },
     account: {
-        title: "用户配置",
+        title: "用户中心",
         navOverview: "概览",
         navKeys: "API Key",
         navUsage: "使用记录",
@@ -719,7 +719,7 @@ export default {
         goLogin: "去登录",
         goRegister: "注册账号",
         keyRequired: "还没有可用的 API Key",
-        keyRequiredHint: "生成任务需要一个可用的 API Key。去用户配置新建一个，并为它选择一个有可用模型的分组 —— 未分组的 Key 没有任何可用模型，工作台不会把它列为候选。",
+        keyRequiredHint: "生成任务需要一个可用的 API Key。去用户中心新建一个，并为它选择一个有可用模型的分组 —— 未分组的 Key 没有任何可用模型，工作台不会把它列为候选。",
         goCreateKey: "去创建 API Key",
         loadFailed: "加载失败",
         retry: "重试",

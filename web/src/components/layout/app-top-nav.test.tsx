@@ -27,7 +27,7 @@ vi.mock("react-router-dom", () => ({
     useLocation: () => ({ pathname: "/video" }),
 }));
 
-vi.mock("@/constant/navigation-tools", () => ({ navigationTools: [], visibleNavigationTools: () => [] }));
+vi.mock("@/constant/navigation-tools", () => ({ navigationTools: [] }));
 vi.mock("@/components/layout/app-config-modal", () => ({ AppConfigModal: () => null }));
 vi.mock("@/components/layout/credential-prompt-modal", () => ({ CredentialPromptModal: () => null }));
 vi.mock("@/components/layout/mobile-nav-drawer", () => ({ MobileNavDrawer: () => null }));

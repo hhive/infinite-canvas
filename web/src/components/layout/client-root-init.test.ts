@@ -23,7 +23,7 @@ describe("shouldInitializeClientRoot", () => {
     });
 
     it("does not initialize on routes that never need it", () => {
-        // 定价页是纯展示；用户配置页只做账号操作，弹渠道配置框会盖住登录引导。
+        // 定价页是纯展示；用户中心页只做账号操作，弹渠道配置框会盖住登录引导。
         expect(shouldInitializeClientRoot("/pricing")).toBe(false);
         expect(shouldInitializeClientRoot("/account")).toBe(false);
         expect(shouldInitializeClientRoot("/account/keys")).toBe(false);

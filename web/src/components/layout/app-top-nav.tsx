@@ -3,15 +3,15 @@ import { Button, Tooltip } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
-import { visibleNavigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
+import { navigationTools, type NavigationToolSlug } from "@/constant/navigation-tools";
 import { AppConfigModal } from "@/components/layout/app-config-modal";
 import { CredentialPromptModal } from "@/components/layout/credential-prompt-modal";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { cn } from "@/lib/utils";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAgentStore } from "@/stores/use-agent-store";
-import { ensureSessionLoaded, useSessionStore } from "@/stores/use-session-store";
+import { ensureSessionLoaded } from "@/stores/use-session-store";
 
 export function AppTopNav() {
     const { t } = useTranslation();
@@ -24,10 +24,9 @@ export function AppTopNav() {
     const connectAgent = useAgentStore((state) => state.connectAgent);
     const togglePanel = useAgentStore((state) => state.togglePanel);
     const panelOpen = useAgentStore((state) => state.panelOpen);
-    const authSource = useSessionStore((state) => state.authSource);
     const hideHeader = /^\/canvas\/[^/]+/.test(pathname);
     const slug = pathname.split("/").filter(Boolean)[0];
-    const tools = useMemo(() => visibleNavigationTools(authSource), [authSource]);
+    const tools = navigationTools;
     const activeToolSlug = tools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
 
     useEffect(() => {

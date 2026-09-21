@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { navigationTools, visibleNavigationTools } from "@/constant/navigation-tools";
+import { navigationTools } from "@/constant/navigation-tools";
 import enUS from "@/i18n/locales/en-US";
 import zhCN from "@/i18n/locales/zh-CN";
 
@@ -18,18 +18,10 @@ describe("navigation tools translations", () => {
         expect(zhCN.navigation.config).toBe("系统配置");
         expect(enUS.navigation.config).toBe("System Settings");
     });
-});
 
-describe("visibleNavigationTools", () => {
-    const slugs = (authSource: Parameters<typeof visibleNavigationTools>[0]) => visibleNavigationTools(authSource).map((tool) => tool.slug);
-
-    it("shows the user center entry for password sessions and for visitors without a session", () => {
-        expect(slugs("password")).toContain("account");
-        expect(slugs(null)).toContain("account");
-    });
-
-    it("hides the user center entry for launch sessions while keeping every other entry", () => {
-        expect(slugs("launch")).not.toContain("account");
-        expect(slugs("launch")).toEqual(navigationTools.map((tool) => tool.slug).filter((slug) => slug !== "account"));
+    it("keeps the user center out of the left navigation and labels it for the top bar entry", () => {
+        expect(navigationTools.map((tool) => tool.slug)).not.toContain("account");
+        expect(zhCN.navigation.account).toBe("用户中心");
+        expect(enUS.navigation.account).toBe("User Center");
     });
 });

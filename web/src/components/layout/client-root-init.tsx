@@ -87,7 +87,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 //
                 // 只在**一把 Key 都没有**时提示去创建：Key 必须有「有可用模型的分组」才可能被选中
                 // （未分组的 Key 模型数为 0），所以已有 Key 却仍不可用时再劝「去创建」只会让用户
-                // 原地打转。那种情况交给工作台自己的选择器提示与导航里的用户配置入口。
+                // 原地打转。那种情况交给工作台自己的选择器提示与顶栏的用户中心入口。
                 if (!authenticationKey.trim() && shouldPromptOnEntry(window.location.pathname)) {
                     await ensureSessionLoaded().catch(() => undefined);
                     const session = useSessionStore.getState();
@@ -145,7 +145,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
  * `/config` 必须在名单内：配置面板的模型选项来自 `applyMediaModels` 写入的媒体模型目录，
  * 而该目录只在根初始化里拉取（`fetchMediaModels` 循环在探测链之外，不受自动弹框门限影响）。
  * `/prompts` 不需要：提示词来源由 `usePromptSourceScheduler()` 独立驱动，与模型目录无关。
- * 定价页是纯展示（见 f9a32c3）；用户配置页只做账号操作（API Key、用量、余额、兑换）。
+ * 定价页是纯展示（见 f9a32c3）；用户中心页只做账号操作（API Key、用量、余额、兑换）。
  */
 const CLIENT_ROOT_INIT_ROUTES = new Set(["/", "/image", "/video", "/canvas", "/config"]);
 // 需初始化页面的子路由前缀。注意段边界：`/canvas/` 不会匹配 `/canvases`。
