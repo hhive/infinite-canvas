@@ -93,6 +93,24 @@ describe("cookie session readiness", () => {
 });
 
 describe("applyMediaModels", () => {
+    it("publishes the exact gpt-image-2 catalog entry for image selection", () => {
+        useConfigStore.setState((state) => ({
+            config: {
+                ...state.config,
+                channels: [{ ...state.config.channels[0], models: ["gpt-image-2.5-flare"] }],
+                imageModels: ["default::gpt-image-2.5-flare"],
+                imageModel: "default::gpt-image-2.5-flare",
+            },
+        }));
+
+        useConfigStore.getState().applyMediaModels("image", [imageModel(10, "gpt-image-2")]);
+
+        const state = useConfigStore.getState();
+        expect(state.config.imageModels).toEqual(["default::gpt-image-2"]);
+        expect(state.config.imageModel).toBe("default::gpt-image-2");
+        expect(state.config.models).toContain("default::gpt-image-2");
+    });
+
     it("keeps distinct image model names when display names match", () => {
         useConfigStore.setState((state) => ({
             config: {

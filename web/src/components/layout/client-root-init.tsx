@@ -66,6 +66,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         );
         if (apiKey && !sub2apiLaunch) updateConfig("apiKey", apiKey);
         const channel = { ...(firstChannel || createModelChannel({ id: "default", name: t("config.channels.defaultName") })), apiKey: authenticationKey };
+        const requestId = ++mediaRequest.current;
+        const requestEpoch = currentMediaModelRequestEpoch();
         void probeImageSession(authenticationKey)
             .then(async (ready) => {
                 setCookieSessionReady(cookieSessionReadiness(ready, authenticationKey));
@@ -96,10 +98,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                         if (useMediaAPIKeyStore.getState().status === "empty") openCredentialPrompt("createKey");
                     }
                 }
-                return fetchChannelModels(channel);
+                return shouldRefreshChannelModels(authenticationKey) ? fetchChannelModels(channel) : undefined;
             })
             .then((models) => {
-                if (!models) return;
+                if (!models || !shouldApplyChannelModels(requestId, mediaRequest.current, requestEpoch, currentMediaModelRequestEpoch())) return;
                 useConfigStore.setState((state) => ({ config: mergeFetchedChannelModels(state.config, models) }));
                 if (apiKey) message.success(t("config.importedDirectConfig"));
             })
@@ -112,8 +114,6 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
                 setCookieSessionReady(cookieSessionReadiness(true, authenticationKey));
                 message.error(error instanceof Error ? error.message : "读取模型失败");
             });
-        const requestId = ++mediaRequest.current;
-        const requestEpoch = currentMediaModelRequestEpoch();
         for (const capability of ["image", "video"] as MediaCapability[]) {
             setMediaModelsLoading(capability);
             void fetchMediaModels(capability, authenticationKey)
@@ -191,6 +191,18 @@ export function configPromptForProbeFailure(authenticationKey: string, hasSessio
  */
 export function cookieSessionReadiness(probeSucceeded: boolean, authenticationKey: string) {
     return probeSucceeded && !authenticationKey.trim();
+}
+
+/**
+ * 媒体会话没有显式 Bearer Key 时，模型目录由 fetchMediaModels 提供。
+ * 旧的直连渠道探测若继续返回，会把第一渠道的 image 模型覆盖成旧目录。
+ */
+export function shouldRefreshChannelModels(authenticationKey: string) {
+    return authenticationKey.trim().length > 0;
+}
+
+export function shouldApplyChannelModels(requestId: number, currentRequestId: number, requestEpoch: number, currentRequestEpoch: number) {
+    return requestId === currentRequestId && requestEpoch === currentRequestEpoch;
 }
 
 export function mergeFetchedChannelModels(config: AiConfig, fetchedImageModels: string[]): AiConfig {

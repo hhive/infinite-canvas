@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { configPromptForProbeFailure, cookieSessionReadiness, mergeFetchedChannelModels, shouldInitializeClientRoot, shouldPromptOnEntry } from "@/components/layout/client-root-init";
+import { configPromptForProbeFailure, cookieSessionReadiness, mergeFetchedChannelModels, shouldApplyChannelModels, shouldInitializeClientRoot, shouldPromptOnEntry, shouldRefreshChannelModels } from "@/components/layout/client-root-init";
 import { defaultConfig, selectableModelsByCapability } from "@/stores/use-config-store";
 
 describe("shouldInitializeClientRoot", () => {
@@ -99,6 +99,25 @@ describe("mergeFetchedChannelModels", () => {
 
         expect(selectableModelsByCapability(merged, "video")).toEqual([`default::${videoModel.model}`]);
         expect(merged.videoModel).toBe(`default::${videoModel.model}`);
+    });
+});
+
+describe("shouldRefreshChannelModels", () => {
+    it("does not let the session catalog be overwritten by the legacy channel fetch", () => {
+        expect(shouldRefreshChannelModels("")).toBe(false);
+        expect(shouldRefreshChannelModels("   ")).toBe(false);
+    });
+
+    it("keeps explicit API-key channel discovery enabled", () => {
+        expect(shouldRefreshChannelModels("sk-explicit")).toBe(true);
+    });
+});
+
+describe("shouldApplyChannelModels", () => {
+    it("rejects stale channel responses after a newer media request", () => {
+        expect(shouldApplyChannelModels(1, 2, 4, 4)).toBe(false);
+        expect(shouldApplyChannelModels(1, 1, 3, 4)).toBe(false);
+        expect(shouldApplyChannelModels(1, 1, 4, 4)).toBe(true);
     });
 });
 
