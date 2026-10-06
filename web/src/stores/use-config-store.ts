@@ -88,6 +88,35 @@ export const SAME_ORIGIN_API_BASE_URL = window.location.origin;
 export const LOCAL_PROXY_PACKAGE = "@basketikun/canvas-proxy";
 export const DEFAULT_LOCAL_PROXY_URL = "http://127.0.0.1:23210";
 
+function isSameOriginMediaChannel(channel: Pick<ModelChannel, "baseUrl">) {
+    try {
+        return new URL(channel.baseUrl.trim()).origin === new URL(SAME_ORIGIN_API_BASE_URL).origin;
+    } catch {
+        return false;
+    }
+}
+
+export function stripPersistedMediaCatalog(config: AiConfig): AiConfig {
+    const persistedChannels = Array.isArray(config.channels) ? config.channels : [];
+    const channels = persistedChannels.map((channel, index) => {
+        if (index !== 0 || !isSameOriginMediaChannel(channel)) return channel;
+        return {
+            ...channel,
+            // 图片、视频和文本目录每次从媒体 API 读取；音频仍是用户配置项，继续持久化。
+            models: normalizeChannelModels(channel.models).filter((model) => model.capability === "audio"),
+        };
+    });
+    const mediaChannel = channels[0] && isSameOriginMediaChannel(channels[0]);
+    return {
+        ...config,
+        channels,
+        models: mediaChannel ? modelOptionsFromChannels(channels) : config.models,
+        imageModels: mediaChannel ? [] : config.imageModels,
+        videoModels: mediaChannel ? [] : config.videoModels,
+        textModels: mediaChannel ? [] : config.textModels,
+    };
+}
+
 export const defaultConfig: AiConfig = {
     channelMode: "local",
     baseUrl: OPENAI_BASE_URL,
@@ -376,12 +405,11 @@ export const useConfigStore = create<ConfigStore>()(
                 const options = normalizedMediaModels.map((item) => encodeChannelModel(firstChannel.id, item.model));
                 const modelKey = capability === "image" ? "imageModel" : capability === "video" ? "videoModel" : "textModel";
                 const modelsKey = capability === "image" ? "imageModels" : capability === "video" ? "videoModels" : "textModels";
-                const previousNames = new Set(state.config[modelsKey].map(modelOptionName));
                 const channels = [{
                     ...firstChannel,
                     baseUrl: SAME_ORIGIN_API_BASE_URL,
                     models: normalizeChannelModels([
-                        ...firstChannel.models.filter((model) => !previousNames.has(model.name)),
+                        ...firstChannel.models.filter((model) => model.capability !== capability),
                         ...normalizedMediaModels.map((item) => ({ name: item.model, capability })),
                     ]),
                 }, ...state.config.channels.slice(1)];
@@ -397,13 +425,14 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
-            partialize: (state) => ({ config: state.config, webdav: state.webdav }),
+            partialize: (state) => ({ config: stripPersistedMediaCatalog(state.config), webdav: state.webdav }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
-                const config = { ...defaultConfig, ...persistedConfig };
+                const config = stripPersistedMediaCatalog({ ...defaultConfig, ...persistedConfig });
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
+                const mediaChannel = Boolean(config.channels[0] && isSameOriginMediaChannel(config.channels[0]));
                 const channels = normalizeChannels(config);
                 const models = modelOptionsFromChannels(channels);
                 return {
@@ -415,9 +444,9 @@ export const useConfigStore = create<ConfigStore>()(
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
                         models,
-                        imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-                        videoModel: normalizeModelOptionValue(config.videoModel, channels),
-                        textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
+                        imageModel: mediaChannel ? config.imageModel || config.model || defaultConfig.imageModel : normalizeModelOptionValue(config.imageModel || config.model, channels),
+                        videoModel: mediaChannel ? config.videoModel || defaultConfig.videoModel : normalizeModelOptionValue(config.videoModel, channels),
+                        textModel: mediaChannel ? config.textModel || config.model || defaultConfig.textModel : normalizeModelOptionValue(config.textModel || config.model, channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
                         audioFormat: config.audioFormat || defaultConfig.audioFormat,

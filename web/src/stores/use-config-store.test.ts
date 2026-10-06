@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { MediaModel } from "@/services/api/media-models";
-import { defaultConfig, resolveMissingKeyPrompt, resolveModelForCapability, useConfigStore } from "@/stores/use-config-store";
+import { defaultConfig, resolveMissingKeyPrompt, resolveModelForCapability, selectableModelsByCapability, stripPersistedMediaCatalog, useConfigStore } from "@/stores/use-config-store";
 import { resetSessionStoreForTest, useSessionStore } from "@/stores/use-session-store";
 
 beforeEach(() => {
@@ -109,6 +109,32 @@ describe("applyMediaModels", () => {
         expect(state.config.imageModels).toEqual(["default::gpt-image-2"]);
         expect(state.config.imageModel).toBe("default::gpt-image-2");
         expect(state.config.models).toContain("default::gpt-image-2");
+        expect(selectableModelsByCapability(state.config, "image")).toContain("default::gpt-image-2");
+    });
+
+    it("replaces stale image entries even when the persisted image list is missing", () => {
+        useConfigStore.setState((state) => ({
+            config: {
+                ...state.config,
+                channels: [{
+                    ...state.config.channels[0],
+                    baseUrl: window.location.origin,
+                    models: [
+                        { name: "old-image-model", capability: "image" as const },
+                        { name: "gpt-4o-mini-tts", capability: "audio" as const },
+                    ],
+                }],
+                imageModels: [],
+                imageModel: "default::old-image-model",
+            },
+        }));
+
+        useConfigStore.getState().applyMediaModels("image", [imageModel(11, "gpt-image-2")]);
+
+        expect(useConfigStore.getState().config.channels[0].models).toEqual([
+            { name: "gpt-4o-mini-tts", capability: "audio" },
+            { name: "gpt-image-2", capability: "image" },
+        ]);
     });
 
     it("keeps distinct image model names when display names match", () => {
@@ -199,6 +225,76 @@ describe("applyMediaModels", () => {
         useConfigStore.getState().applyMediaModels("text", [{ ...imageModel(43, "gpt-6-astra"), id: "gpt-6-astra", mediaType: "text" }]);
 
         expect(useConfigStore.getState().config.textModel).toBe("default::gpt-6-astra");
+    });
+});
+
+describe("stripPersistedMediaCatalog", () => {
+    it("excludes the live catalog from persisted snapshots and removes old snapshots on restore", () => {
+        const staleConfig = {
+            ...defaultConfig,
+            channels: [{
+                ...defaultConfig.channels[0],
+                baseUrl: window.location.origin,
+                models: [{ name: "old-image-model", capability: "image" as const }],
+            }],
+            imageModels: ["default::old-image-model"],
+            imageModel: "default::old-image-model",
+        };
+        const state = { ...useConfigStore.getState(), config: staleConfig };
+        const persistOptions = useConfigStore.persist.getOptions();
+
+        const snapshot = persistOptions.partialize?.(state);
+        expect(snapshot?.config?.channels?.[0]?.models).toEqual([]);
+        expect(snapshot?.config?.imageModels).toEqual([]);
+        expect(snapshot?.config?.imageModel).toBe("default::old-image-model");
+
+        const restored = persistOptions.merge?.({ config: staleConfig }, state) as typeof state;
+        expect(restored.config.channels[0].models).toEqual([]);
+        expect(restored.config.imageModels).toEqual([]);
+        expect(restored.config.imageModel).toBe("default::old-image-model");
+    });
+
+    it("drops the same-origin image/video/text catalog while retaining audio", () => {
+        const config = {
+            ...defaultConfig,
+            channels: [{
+                ...defaultConfig.channels[0],
+                baseUrl: window.location.origin,
+                models: [
+                    { name: "old-image-model", capability: "image" as const },
+                    { name: "old-video-model", capability: "video" as const },
+                    { name: "old-text-model", capability: "text" as const },
+                    { name: "gpt-4o-mini-tts", capability: "audio" as const },
+                ],
+            }],
+            imageModels: ["default::old-image-model"],
+            videoModels: ["default::old-video-model"],
+            textModels: ["default::old-text-model"],
+            imageModel: "default::old-image-model",
+            videoModel: "default::old-video-model",
+            textModel: "default::old-text-model",
+        };
+
+        const stripped = stripPersistedMediaCatalog(config);
+
+        expect(stripped.channels[0].models).toEqual([{ name: "gpt-4o-mini-tts", capability: "audio" }]);
+        expect(stripped.imageModels).toEqual([]);
+        expect(stripped.videoModels).toEqual([]);
+        expect(stripped.textModels).toEqual([]);
+        expect(stripped.imageModel).toBe("default::old-image-model");
+        expect(stripped.videoModel).toBe("default::old-video-model");
+        expect(stripped.textModel).toBe("default::old-text-model");
+    });
+
+    it("does not alter an external custom channel", () => {
+        const config = {
+            ...defaultConfig,
+            channels: [{ ...defaultConfig.channels[0], baseUrl: "https://provider.example/v1", models: [{ name: "custom-image", capability: "image" as const }] }],
+            imageModels: ["default::custom-image"],
+            imageModel: "default::custom-image",
+        };
+
+        expect(stripPersistedMediaCatalog(config)).toEqual(config);
     });
 });
 
