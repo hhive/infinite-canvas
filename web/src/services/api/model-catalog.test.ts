@@ -40,4 +40,19 @@ describe("imagePricingRows", () => {
     it("omits the upscale row for models that do not declare it", () => {
         expect(imagePricingRows({ media_type: "image", name: "gpt-image-2", sizes: ["1k"], qualities: ["low"], price_1k: 0.03, price_upscale: 0.02, price_low: 0.03, calls: [] })).toEqual([{ label: "1K", price: 0.03 }, { label: "低", price: 0.03 }]);
     });
+
+    // gpt-image-2.5 的 xhigh/max 是与 high 并列的独立档位，后端 /api/pricing 会下发
+    // price_xhigh/price_max；画布漏了这两档会导致质量价格少显示两行。
+    it("shows the xhigh and max quality tiers", () => {
+        expect(imagePricingRows({ media_type: "image", name: "gpt-image-2.5", sizes: ["1k"], qualities: ["low", "medium", "high", "upscale", "xhigh", "max"], price_1k: 0.03, price_upscale: 0.02, price_low: 0.11, price_medium: 0.12, price_high: 0.15, price_xhigh: 0.16, price_max: 0.16, calls: [] })).toEqual([
+            { label: "1K", price: 0.03 },
+            { label: "超分", price: 0.02 },
+            { label: "低", price: 0.11 },
+            { label: "中", price: 0.12 },
+            { label: "高", price: 0.15 },
+            { label: "超高", price: 0.16 },
+            { label: "最高", price: 0.16 },
+        ]);
+        expect(imagePricingRows({ media_type: "image", name: "gpt-image-2.5", sizes: [], qualities: ["xhigh", "max"], price_xhigh: 0.16, price_max: 0.16, calls: [] })).toEqual([{ label: "超高", price: 0.16 }, { label: "最高", price: 0.16 }]);
+    });
 });

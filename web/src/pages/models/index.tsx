@@ -9,10 +9,10 @@ function money(value?: number) {
 }
 
 const resolutionLabels = new Set(["1K", "2K", "4K"]);
-const qualityLabels = new Set(["超分", "低", "中", "高"]);
-// 后端 qualities 是各配置的并集且按字母序排列（high / low / medium / upscale），
-// 展示统一按配置档位顺序：超分 → 低 → 中 → 高。未识别的取值排在最后并保持相对顺序。
-const qualityOrder = ["upscale", "low", "medium", "high"];
+const qualityLabels = new Set(["超分", "低", "中", "高", "超高", "最高"]);
+// 后端 qualities 是各配置的并集且按字母序排列（high / low / max / medium / upscale / xhigh），
+// 展示统一按配置档位顺序：超分 → 低 → 中 → 高 → 超高 → 最高。未识别的取值排在最后并保持相对顺序。
+const qualityOrder = ["upscale", "low", "medium", "high", "xhigh", "max"];
 // upscale 是内部档位：客户端触发超分的方式是传 auto（或不传），故该行按客户端取值显示。
 const qualityDisplay: Record<string, string> = { upscale: "auto" };
 export function qualityText(qualities: string[]) {

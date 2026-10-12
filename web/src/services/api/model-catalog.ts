@@ -18,6 +18,8 @@ export type MarketplaceModel = {
     price_low?: number;
     price_medium?: number;
     price_high?: number;
+    price_xhigh?: number;
+    price_max?: number;
     price_quota?: number;
     max_reference_images?: number;
     max_reference_videos?: number;
@@ -47,6 +49,8 @@ export function imagePricingRows(model: MarketplaceModel) {
         ...(qualities.has("low") ? [{ label: "低", price: model.price_low }] : []),
         ...(qualities.has("medium") ? [{ label: "中", price: model.price_medium }] : []),
         ...(qualities.has("high") ? [{ label: "高", price: model.price_high }] : []),
+        ...(qualities.has("xhigh") ? [{ label: "超高", price: model.price_xhigh }] : []),
+        ...(qualities.has("max") ? [{ label: "最高", price: model.price_max }] : []),
     ];
 }
 

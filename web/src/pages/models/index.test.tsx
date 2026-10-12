@@ -68,11 +68,13 @@ beforeEach(async () => {
                         display_name: "完整显示名称",
                         provider: "OpenAI",
                         sizes: ["1k", "2k"],
-                        qualities: ["low", "high"],
+                        qualities: ["low", "high", "xhigh", "max"],
                         price_1k: 1,
                         price_2k: 2,
                         price_low: 0.5,
                         price_high: 3,
+                        price_xhigh: 4,
+                        price_max: 5,
                         note: "这是需要完整换行展示的公开模型备注，不应该被截断。",
                         calls: [{ label: "同步生成", method: "POST", path: "/v1/images/generations", example: longCallExample, auth: "Bearer" }],
                     },
@@ -217,9 +219,9 @@ describe("ModelsPage", () => {
     it("shows the same image model details as the media admin marketplace", () => {
         const imageGroup = container.querySelector('[data-testid="marketplace-group-1"]');
         expect(imageGroup?.textContent).toContain("尺寸：1k / 2k");
-        expect(imageGroup?.textContent).toContain("质量：low / high");
+        expect(imageGroup?.textContent).toContain("质量：low / high / xhigh / max");
         expect(imageGroup?.textContent).toContain("分辨率价格：1K 1 · 2K 2");
-        expect(imageGroup?.textContent).toContain("质量价格：低 0.5 · 高 3");
+        expect(imageGroup?.textContent).toContain("质量价格：低 0.5 · 高 3 · 超高 4 · 最高 5");
         expect(imageGroup?.textContent).toContain("分辨率和质量同时传入时，按两者中较高价格计费。");
     });
 
@@ -354,6 +356,11 @@ describe("qualityText", () => {
     it("keeps the previous order for tiers without upscale", () => {
         expect(qualityText(["low", "high"])).toBe("low / high");
         expect(qualityText(["medium", "low"])).toBe("low / medium");
+    });
+
+    it("orders the gpt-image-2.5 xhigh and max tiers after high", () => {
+        // 这两档的对客取值就是字面 xhigh / max，不走 upscale→auto 的映射。
+        expect(qualityText(["max", "xhigh", "high", "upscale", "medium", "low"])).toBe("auto / low / medium / high / xhigh / max");
     });
 
     it("appends unknown tiers last without reordering them", () => {
