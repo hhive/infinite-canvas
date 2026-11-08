@@ -50,6 +50,12 @@ export function normalizeImageFrameDurationMs(value: string | number | undefined
     return Math.min(2000, Math.max(20, duration));
 }
 
+export const DEFAULT_SVG_AUTHOR_MODEL = "gpt-6.1-sol";
+
+export function normalizeImageSvgModel(value: string | undefined) {
+    return String(value || "").trim() || DEFAULT_SVG_AUTHOR_MODEL;
+}
+
 /** 服务端结果里的格式值可能是 png/jpeg/webp/gif/svg，统一映射到 MIME。 */
 export function imageMimeTypeForFormat(value: string | undefined) {
     switch (String(value || "").trim().toLowerCase()) {

@@ -132,6 +132,7 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         imageFormat: node?.metadata?.format || config.imageFormat || defaultConfig.imageFormat,
         imageFrameCount: node?.metadata?.frameCount ? String(node.metadata.frameCount) : config.imageFrameCount || defaultConfig.imageFrameCount,
         imageFrameDurationMs: node?.metadata?.frameDurationMs ? String(node.metadata.frameDurationMs) : config.imageFrameDurationMs || defaultConfig.imageFrameDurationMs,
+        imageSvgModel: node?.metadata?.svgModel || config.imageSvgModel || defaultConfig.imageSvgModel,
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
         vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,
         videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,

@@ -51,6 +51,7 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
         complexity: normalizeImageComplexity(config.imageComplexity) || "auto",
         format: normalizeImageOutputFormat(config.imageFormat),
         ...(normalizeImageOutputFormat(config.imageFormat) === "gif" ? { frameCount: normalizeImageFrameCount(config.imageFrameCount), frameDurationMs: normalizeImageFrameDurationMs(config.imageFrameDurationMs) } : {}),
+        ...(normalizeImageOutputFormat(config.imageFormat) === "svg" ? { svgModel: config.imageSvgModel || "gpt-6.1-sol" } : {}),
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
     };

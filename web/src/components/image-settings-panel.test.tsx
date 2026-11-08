@@ -109,6 +109,23 @@ describe("image settings 2.6 controls", () => {
         expect(container.textContent).toContain("输出格式");
     });
 
+    it("lets users change the svg author model", () => {
+        useConfigStore.setState({ mediaModels: { image: [{ id: "gpt-image-2.6-flare", mediaType: "image", model: "gpt-image-2.6-flare", displayName: "gpt-image-2.6-flare", providerName: "", apiMode: "images_2_6", priceQuota: 0 }], video: [], text: [] } });
+        const onConfigChange = vi.fn();
+        render(imageConfig("gpt-image-2.6-flare", { imageFormat: "svg" }), onConfigChange);
+
+        expect(container.textContent).toContain("SVG 作者模型");
+        const input = Array.from(container.querySelectorAll("input[type=text]")).find((item) => (item as HTMLInputElement).value === "gpt-6.1-sol");
+        expect(input).toBeTruthy();
+        act(() => {
+            const field = input as HTMLInputElement;
+            const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+            setValue?.call(field, "gpt-6-x");
+            field.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        expect(onConfigChange).toHaveBeenCalledWith("svgModel", "gpt-6-x");
+    });
+
     it("shows gif frame controls only for gif output", () => {
         useConfigStore.setState({ mediaModels: { image: [{ id: "gpt-image-2.6-flare", mediaType: "image", model: "gpt-image-2.6-flare", displayName: "gpt-image-2.6-flare", providerName: "", apiMode: "images_2_6", priceQuota: 0 }], video: [], text: [] } });
         const onConfigChange = vi.fn();

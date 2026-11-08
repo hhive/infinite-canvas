@@ -690,6 +690,7 @@ function GenerationSettings({ config, model, taskActive, updateConfig, openConfi
                     else if (key === "format") updateConfig("imageFormat", value);
                     else if (key === "frameCount") updateConfig("imageFrameCount", value);
                     else if (key === "frameDurationMs") updateConfig("imageFrameDurationMs", value);
+                    else if (key === "svgModel") updateConfig("imageSvgModel", value);
                     else updateConfig(key, value);
                 }} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>

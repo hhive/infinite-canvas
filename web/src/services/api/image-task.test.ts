@@ -483,7 +483,18 @@ describe("gpt-image-2.6 image requests", () => {
         const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
         expect(body.n).toBe(1);
         expect(body.output_format).toBe("svg");
+        expect(body.svg).toEqual({ model: "gpt-6.1-sol" });
         expect(images[0]?.dataUrl.startsWith("data:image/svg+xml;base64,")).toBe(true);
+    });
+
+    it("sends a custom svg author model", async () => {
+        await registerModel("gpt-image-2.6-sunburst");
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.6-sunburst", { data: [{ b64_json: "PHN2Zz4=" }], output_format: "svg" }) });
+
+        await requestGeneration(image26Config("gpt-image-2.6-sunburst", { imageFormat: "svg", imageSvgModel: "gpt-6-x" }), "draw");
+
+        const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
+        expect(body.svg).toEqual({ model: "gpt-6-x" });
     });
 
     it("uses the task output_format when a completed task is resumed", async () => {

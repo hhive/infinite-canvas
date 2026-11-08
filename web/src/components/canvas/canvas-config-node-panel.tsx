@@ -170,6 +170,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         imageFormat: node.metadata?.format || globalConfig.imageFormat || defaultConfig.imageFormat,
         imageFrameCount: node.metadata?.frameCount ? String(node.metadata.frameCount) : globalConfig.imageFrameCount || defaultConfig.imageFrameCount,
         imageFrameDurationMs: node.metadata?.frameDurationMs ? String(node.metadata.frameDurationMs) : globalConfig.imageFrameDurationMs || defaultConfig.imageFrameDurationMs,
+        imageSvgModel: node.metadata?.svgModel || globalConfig.imageSvgModel || defaultConfig.imageSvgModel,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
         videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
@@ -189,6 +190,7 @@ function imageConfigPatch(key: ImageSettingKey, value: string) {
     if (key === "format") return { format: value };
     if (key === "frameCount") return { frameCount: normalizeImageFrameCount(value) };
     if (key === "frameDurationMs") return { frameDurationMs: normalizeImageFrameDurationMs(value) };
+    if (key === "svgModel") return { svgModel: value };
     return { [key]: value };
 }
 

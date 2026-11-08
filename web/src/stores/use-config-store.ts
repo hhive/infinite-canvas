@@ -66,6 +66,7 @@ export type AiConfig = {
     imageFormat: string;
     imageFrameCount: string;
     imageFrameDurationMs: string;
+    imageSvgModel: string;
     proxyEnabled: boolean;
     proxyUrl: string;
     nodeRegenerateBehavior: "new-node" | "overwrite";
@@ -175,6 +176,7 @@ export const defaultConfig: AiConfig = {
     imageFormat: "png",
     imageFrameCount: "9",
     imageFrameDurationMs: "200",
+    imageSvgModel: "gpt-6.1-sol",
     proxyEnabled: false,
     proxyUrl: DEFAULT_LOCAL_PROXY_URL,
     nodeRegenerateBehavior: "new-node",
@@ -443,7 +445,7 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
-            partialize: (state) => ({ config: stripPersistedMediaCatalog(state.config), webdav: state.webdav }),
+            partialize: (state) => ({ config: { ...stripPersistedMediaCatalog(state.config), imageSvgModel: String(state.config.imageSvgModel || "").trim() || "gpt-6.1-sol" }, webdav: state.webdav }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
@@ -482,6 +484,7 @@ export const useConfigStore = create<ConfigStore>()(
                         imageFormat: normalizeImageOutputFormat(config.imageFormat),
                         imageFrameCount: String(normalizeImageFrameCount(config.imageFrameCount)),
                         imageFrameDurationMs: String(normalizeImageFrameDurationMs(config.imageFrameDurationMs)),
+                        imageSvgModel: String(config.imageSvgModel || "gpt-6.1-sol").trim() || "gpt-6.1-sol",
                         imageModels: normalizeCapabilityModelList(persistedConfig.imageModels, channels, "image"),
                         videoModels: normalizeCapabilityModelList(persistedConfig.videoModels, channels, "video"),
                         textModels: normalizeCapabilityModelList(persistedConfig.textModels, channels, "text"),

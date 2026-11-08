@@ -32,7 +32,7 @@ export const imageComplexityOptions = complexityOptions.map((item) => ({ value: 
 export const imageAspectOptions = mediaRatioOptions.map((item) => ({ value: item.value, label: item.value === "auto" ? i18n.t("settingsPanels.common.auto") : item.value }));
 export const imageScaleOptions = mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? i18n.t("settingsPanels.common.auto") : value }));
 
-export type ImageSettingKey = "quality" | "size" | "count" | "background" | "complexity" | "format" | "frameCount" | "frameDurationMs";
+export type ImageSettingKey = "quality" | "size" | "count" | "background" | "complexity" | "format" | "frameCount" | "frameDurationMs" | "svgModel";
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
@@ -169,6 +169,19 @@ export function ImageSettingsPanel({ config, model, onConfigChange, theme, showT
                             </div>
                         ) : null}
                         {format === "svg" ? <div className="text-xs" style={{ color: theme.node.muted }}>{t("settingsPanels.image.svgSingle")}</div> : null}
+                        {format === "svg" ? (
+                            <label className="space-y-1 text-xs" style={{ color: theme.node.muted }}>
+                                <span>{t("settingsPanels.image.svgModel")}</span>
+                                <input
+                                    type="text"
+                                    className="h-9 w-full rounded-xl border bg-transparent px-3 text-sm outline-none"
+                                    style={{ borderColor: theme.node.stroke, color: theme.node.text, WebkitTextFillColor: theme.node.text }}
+                                    value={config.imageSvgModel || "gpt-6.1-sol"}
+                                    onChange={(event) => onConfigChange("svgModel", event.target.value)}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                />
+                            </label>
+                        ) : null}
                     </div>
                 ) : null}
                 <div className="flex items-center justify-between gap-3">

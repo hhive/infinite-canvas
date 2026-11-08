@@ -4,7 +4,7 @@ import i18n from "@/i18n";
 import { buildApiUrl, modelOptionName, resolveModelChannel, resolveModelRequestConfig, resolveModelScript, useConfigStore, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
-import { imageMimeTypeForFormat, normalizeImageComplexity, normalizeImageFrameCount, normalizeImageFrameDurationMs, normalizeImageOutputFormat, supportsImage26, supportsImageComplexity, type ImageOutputFormat } from "@/lib/image-26";
+import { imageMimeTypeForFormat, normalizeImageComplexity, normalizeImageFrameCount, normalizeImageFrameDurationMs, normalizeImageOutputFormat, normalizeImageSvgModel, supportsImage26, supportsImageComplexity, type ImageOutputFormat } from "@/lib/image-26";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { dataUrlToBlob, imageToDataUrl } from "@/services/image-storage";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
@@ -765,6 +765,7 @@ function image26RequestFields(config: AiConfig, request: ReturnType<typeof resol
         ...(includeComplexity && request.complexity ? { complexity: request.complexity } : {}),
         output_format: request.format,
         ...(request.format === "gif" ? { frame_count: normalizeImageFrameCount(config.imageFrameCount), frame_duration_ms: normalizeImageFrameDurationMs(config.imageFrameDurationMs) } : {}),
+        ...(request.format === "svg" ? { svg: { model: normalizeImageSvgModel(config.imageSvgModel) } } : {}),
     };
 }
 

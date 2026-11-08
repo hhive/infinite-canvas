@@ -62,6 +62,7 @@ export type CanvasNodeMetadata = {
     format?: string;
     frameCount?: number;
     frameDurationMs?: number;
+    svgModel?: string;
     count?: number;
     textCount?: number;
     /** 文本模式下的视频抽帧速率（帧/秒），缺省 2，收敛到 [1, 5]。 */
