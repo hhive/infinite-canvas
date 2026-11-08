@@ -374,3 +374,104 @@ describe("image model availability", () => {
         expect(axios.post).not.toHaveBeenCalled();
     });
 });
+
+describe("gpt-image-2.6 image requests", () => {
+    async function registerModel(model: string) {
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: openAIModelList(model) });
+        await fetchChannelModels({ id: "default", name: "default", baseUrl: "/v1", apiKey: "sk-test", apiFormat: "openai", models: [] });
+    }
+
+    function image26Config(model: string, overrides: Partial<AiConfig> = {}): AiConfig {
+        return {
+            ...defaultConfig,
+            apiKey: "sk-test",
+            channels: defaultConfig.channels.map((channel) => ({ ...channel, apiKey: "sk-test", models: [model] })),
+            model: `default::${model}`,
+            imageModel: `default::${model}`,
+            size: "1024x1024",
+            quality: "auto",
+            count: "1",
+            imageComplexity: "low",
+            imageFormat: "gif",
+            imageFrameCount: "12",
+            imageFrameDurationMs: "400",
+            ...overrides,
+        };
+    }
+
+    function completedTask(model: string, result: Record<string, unknown>): ImageTask {
+        return {
+            task_id: "task-26",
+            status: "completed",
+            model_config_id: 0,
+            model,
+            poll_after_ms: 500,
+            result: result as ImageTask["result"],
+        };
+    }
+
+    it("sends complexity, gif frames and renders a gif data URL", async () => {
+        await registerModel("gpt-image-2.6-flare");
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.6-flare", { data: [{ b64_json: "R0lGODlh" }], output_format: "gif" }) });
+
+        const images = await requestGeneration(image26Config("gpt-image-2.6-flare"), "draw");
+
+        const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
+        expect(body).toMatchObject({ complexity: "low", output_format: "gif", frame_count: 12, frame_duration_ms: 400 });
+        expect(images).toHaveLength(1);
+        expect(images[0]?.dataUrl.startsWith("data:image/gif;base64,")).toBe(true);
+    });
+
+    it("keeps png and omits 2.6 fields for non-2.6 models", async () => {
+        await registerModel("gpt-image-2.5-flare");
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.5-flare", { data: [{ b64_json: "aW1hZ2U=" }] }) });
+
+        const config = image26Config("gpt-image-2.5-flare");
+        const images = await requestGeneration(config, "draw");
+
+        const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
+        expect(body.output_format).toBe("png");
+        expect(body.complexity).toBeUndefined();
+        expect(body.frame_count).toBeUndefined();
+        expect(body.frame_duration_ms).toBeUndefined();
+        expect(images[0]?.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
+    });
+
+    it("forces n=1 for svg output", async () => {
+        await registerModel("gpt-image-2.6-sunburst");
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.6-sunburst", { data: [{ b64_json: "PHN2Zz4=" }], output_format: "svg" }) });
+
+        const images = await requestGeneration(image26Config("gpt-image-2.6-sunburst", { imageFormat: "svg", count: "4" }), "draw");
+
+        const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
+        expect(body.n).toBe(1);
+        expect(body.output_format).toBe("svg");
+        expect(images[0]?.dataUrl.startsWith("data:image/svg+xml;base64,")).toBe(true);
+    });
+
+    it("uses the task output_format when a completed task is resumed", async () => {
+        const images = await waitForImageTask(completedTask("gpt-image-2.6-flare", { data: [{ b64_json: "R0lGODlh" }], output_format: "gif" }), "");
+        expect(images[0]?.dataUrl.startsWith("data:image/gif;base64,")).toBe(true);
+    });
+
+    it("rejects svg reference edits before sending a request", async () => {
+        const reference = { id: "ref-1", name: "reference.png", type: "image/png", dataUrl: dataUrl("image/png", PNG_BYTES) };
+        await expect(requestEdit(image26Config("gpt-image-2.6-flare", { imageFormat: "svg" }), "edit", [reference])).rejects.toThrow("SVG");
+        expect(axios.post).not.toHaveBeenCalled();
+    });
+
+    it("sends complexity and gif frames on reference edits", async () => {
+        await registerModel("gpt-image-2.6-flare");
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.6-flare", { data: [{ b64_json: "R0lGODlh" }], output_format: "gif" }) });
+        const reference = { id: "ref-1", name: "reference.png", type: "image/png", dataUrl: dataUrl("image/png", PNG_BYTES) };
+
+        const images = await requestEdit(image26Config("gpt-image-2.6-flare"), "edit", [reference]);
+
+        const form = vi.mocked(axios.post).mock.calls[0]?.[1] as FormData;
+        expect(form.get("output_format")).toBe("gif");
+        expect(form.get("complexity")).toBe("low");
+        expect(form.get("frame_count")).toBe("12");
+        expect(form.get("frame_duration_ms")).toBe("400");
+        expect(images[0]?.dataUrl.startsWith("data:image/gif;base64,")).toBe(true);
+    });
+});

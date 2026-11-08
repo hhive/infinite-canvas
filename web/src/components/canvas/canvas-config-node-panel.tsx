@@ -5,8 +5,10 @@ import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
 import { MediaAPIKeyPicker } from "@/components/media-api-key-picker";
+import { type ImageSettingKey } from "@/components/image-settings-panel";
 import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { normalizeImageFrameCount, normalizeImageFrameDurationMs } from "@/lib/image-26";
 import { resolveFrameRate } from "@/lib/canvas/video-frame-sampling-plan";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -111,7 +113,7 @@ export function CanvasConfigNodePanel({ node, isRunning, taskActive = isRunning,
                     {mode === "video" ? (
                         <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                     ) : mode === "image" ? (
-                        <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                        <CanvasImageSettingsPopover config={config} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, imageConfigPatch(key, value))} />
                     ) : mode === "audio" ? (
                         <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                     ) : (
@@ -164,6 +166,10 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,
         background: node.metadata?.background ?? globalConfig.background ?? defaultConfig.background,
+        imageComplexity: node.metadata?.complexity || globalConfig.imageComplexity || defaultConfig.imageComplexity,
+        imageFormat: node.metadata?.format || globalConfig.imageFormat || defaultConfig.imageFormat,
+        imageFrameCount: node.metadata?.frameCount ? String(node.metadata.frameCount) : globalConfig.imageFrameCount || defaultConfig.imageFrameCount,
+        imageFrameDurationMs: node.metadata?.frameDurationMs ? String(node.metadata.frameDurationMs) : globalConfig.imageFrameDurationMs || defaultConfig.imageFrameDurationMs,
         videoSeconds: node.metadata?.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds,
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
         videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
@@ -175,6 +181,15 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         audioInstructions: node.metadata?.audioInstructions || globalConfig.audioInstructions || defaultConfig.audioInstructions,
         count: String(node.metadata?.count || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
     };
+}
+
+function imageConfigPatch(key: ImageSettingKey, value: string) {
+    if (key === "count") return { count: Number(value) || 1 };
+    if (key === "complexity") return { complexity: value };
+    if (key === "format") return { format: value };
+    if (key === "frameCount") return { frameCount: normalizeImageFrameCount(value) };
+    if (key === "frameDurationMs") return { frameDurationMs: normalizeImageFrameDurationMs(value) };
+    return { [key]: value };
 }
 
 function videoConfigPatch(key: keyof AiConfig, value: string) {

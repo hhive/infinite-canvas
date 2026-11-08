@@ -79,6 +79,7 @@ function fileExtension(mimeType: string, storageKey: string) {
     if (mimeType.includes("png")) return "png";
     if (mimeType.includes("jpeg")) return "jpg";
     if (mimeType.includes("webp")) return "webp";
+    if (mimeType.includes("svg")) return "svg";
     if (mimeType.includes("gif")) return "gif";
     if (mimeType.includes("mp4")) return "mp4";
     if (mimeType.includes("webm")) return "webm";

@@ -58,6 +58,10 @@ export type CanvasNodeMetadata = {
     size?: string;
     quality?: string;
     background?: string;
+    complexity?: string;
+    format?: string;
+    frameCount?: number;
+    frameDurationMs?: number;
     count?: number;
     textCount?: number;
     /** 文本模式下的视频抽帧速率（帧/秒），缺省 2，收敛到 [1, 5]。 */

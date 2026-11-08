@@ -19,6 +19,11 @@ export type SupportedImageFormat = {
     extension: ".png" | ".jpg" | ".webp";
 };
 
+export type GeneratedImageFormat = {
+    mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "image/svg+xml";
+    extension: ".png" | ".jpg" | ".webp" | ".gif" | ".svg";
+};
+
 export const INVALID_IMAGE_FORMAT_MESSAGE = "图片格式无效，仅支持有效的 PNG、JPEG 或 WebP 图片";
 
 export class InvalidImageFormatError extends Error {
@@ -86,6 +91,28 @@ export async function normalizeSupportedImageBlob(blob: Blob) {
     if (!format) throw new InvalidImageFormatError();
     return { blob: blob.type === format.mimeType ? blob : new Blob([blob], { type: format.mimeType }), format };
 }
+
+const SVG_HEAD_BYTES = 4096;
+
+export async function detectGeneratedImageFormat(blob: Blob): Promise<GeneratedImageFormat | undefined> {
+    const supported = await detectSupportedImageFormat(blob);
+    if (supported) return supported;
+    const bytes = new Uint8Array(await blob.slice(0, 6).arrayBuffer());
+    if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38 && (bytes[4] === 0x37 || bytes[4] === 0x39) && bytes[5] === 0x61) {
+        return { mimeType: "image/gif", extension: ".gif" };
+    }
+    const text = (await blob.slice(0, SVG_HEAD_BYTES).text()).replace(/^\uFEFF/, "").trimStart();
+    if (/^(?:<\?xml[^>]*>\s*)?<svg[\s>]/i.test(text)) {
+        return { mimeType: "image/svg+xml", extension: ".svg" };
+    }
+    return undefined;
+}
+
+async function normalizeGeneratedImageBlob(blob: Blob) {
+    const format = await detectGeneratedImageFormat(blob);
+    if (!format) throw new InvalidImageFormatError();
+    return { blob: blob.type === format.mimeType ? blob : new Blob([blob], { type: format.mimeType }), format };
+}
 type StoredImagePreview = { version: number; blob?: Blob };
 
 type ImageReadOptions = { signal?: AbortSignal };
@@ -105,20 +132,20 @@ export async function uploadImage(input: string | Blob, options?: ImageReadOptio
     return storeImage(blob, options);
 }
 
-async function storeImage(blob: Blob, options?: ImageReadOptions): Promise<UploadedImage> {
-    const normalized = await normalizeSupportedImageBlob(blob);
+async function storeImage(blob: Blob, options?: ImageReadOptions, generated = false): Promise<UploadedImage> {
+    const normalized = generated ? await normalizeGeneratedImageBlob(blob) : await normalizeSupportedImageBlob(blob);
     blob = normalized.blob;
     const storageKey = `image:${nanoid()}`;
     const url = URL.createObjectURL(blob);
     try {
-        const meta = await loadImageMeta(url, options);
+        const meta = (await loadImageMeta(url, options)) || (normalized.format.mimeType === "image/svg+xml" ? (await readSvgDimensions(blob)) || { width: 1024, height: 1024 } : null);
         if (!meta) throw new Error(i18n.t("common.imageReadFailed"));
         throwIfAborted(options?.signal);
         await store.setItem(storageKey, blob);
         throwIfAborted(options?.signal);
         objectUrls.set(storageKey, url);
-        await storeImagePreview(storageKey, blob);
-        return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type.startsWith("image/") ? blob.type : "" };
+        if (normalized.format.mimeType !== "image/gif" && normalized.format.mimeType !== "image/svg+xml") await storeImagePreview(storageKey, blob);
+        return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: normalized.format.mimeType };
     } catch (error) {
         URL.revokeObjectURL(url);
         await store.removeItem(storageKey).catch(() => undefined);
@@ -133,7 +160,7 @@ export async function uploadGeneratedImage(input: string | Blob, slowMs = GENERA
         console.warn("[canvas:image] local persistence slow", { elapsedMs: Math.round(performance.now() - startedAt), thresholdMs });
     }, thresholdMs);
     try {
-        const uploaded = await uploadImage(input);
+        const uploaded = await uploadGenerated(input);
         console.info("[canvas:image] local persistence completed", { elapsedMs: Math.round(performance.now() - startedAt), bytes: uploaded.bytes });
         return uploaded;
     } catch (error) {
@@ -142,6 +169,33 @@ export async function uploadGeneratedImage(input: string | Blob, slowMs = GENERA
     } finally {
         clearTimeout(timer);
     }
+}
+
+async function uploadGenerated(input: string | Blob) {
+    if (typeof input !== "string") return storeImage(input, undefined, true);
+    let blob: Blob;
+    try {
+        blob = await fetchImageBlob(input);
+    } catch (error) {
+        if (isNamedError(error, IMAGE_RESPONSE_ERROR) || isNamedError(error, IMAGE_TIMEOUT_ERROR) || !/^https?:\/\//i.test(input)) throw error;
+        const meta = await loadImageMeta(input, undefined, IMAGE_REMOTE_LOAD_TIMEOUT_MS);
+        if (!meta) throw error;
+        return { url: input, width: meta.width, height: meta.height, bytes: 0, mimeType: "" };
+    }
+    return storeImage(blob, undefined, true);
+}
+
+/** SVG 结果可能只有 viewBox，Image 解码拿不到固有尺寸时用根节点属性兜底。 */
+async function readSvgDimensions(blob: Blob) {
+    const text = await blob.text();
+    const width = Number(text.match(/\bwidth\s*=\s*"([\d.]+)(?:px)?"/i)?.[1]);
+    const height = Number(text.match(/\bheight\s*=\s*"([\d.]+)(?:px)?"/i)?.[1]);
+    if (width > 0 && height > 0) return { width: Math.round(width), height: Math.round(height) };
+    const viewBox = text.match(/\bviewBox\s*=\s*"([-\d.]+)[\s,]+([-\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)"/i);
+    if (!viewBox) return null;
+    const viewWidth = Number(viewBox[3]);
+    const viewHeight = Number(viewBox[4]);
+    return viewWidth > 0 && viewHeight > 0 ? { width: Math.round(viewWidth), height: Math.round(viewHeight) } : null;
 }
 
 async function fetchImageBlob(url: string, options?: ImageReadOptions) {
@@ -269,7 +323,8 @@ function queueImagePreview(storageKey: string) {
 }
 
 async function storeImagePreview(storageKey: string, original: Blob) {
-    const preview = await createImageThumbnail(original).catch(() => undefined);
+    // GIF 保留动画，SVG 在 createImageBitmap 下无法可靠解码，两者都直接使用原图。
+    const preview = original.type === "image/gif" || original.type === "image/svg+xml" ? undefined : await createImageThumbnail(original).catch(() => undefined);
     await previewStore.setItem<StoredImagePreview>(storageKey, { version: IMAGE_PREVIEW_VERSION, blob: preview }).catch(() => undefined);
     return preview ? cacheImagePreview(storageKey, preview) : undefined;
 }

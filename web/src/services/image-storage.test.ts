@@ -242,4 +242,57 @@ describe("image storage MIME normalization", () => {
 
         await expect(imageToDataUrl({ dataUrl: conflicting })).resolves.toBe(`data:image/png;base64,${Buffer.from(PNG_BYTES).toString("base64")}`);
     });
+
+    it("stores generated GIF results with the gif MIME and without a static preview", async () => {
+        const gif = new File([GIF_BYTES], "generated.gif", { type: "image/gif" });
+
+        const uploaded = await uploadGeneratedImage(gif);
+        const stored = await getImageBlob(uploaded.storageKey!);
+
+        expect(stored?.type).toBe("image/gif");
+        expect(uploaded.mimeType).toBe("image/gif");
+        expect(previewStorage.get(uploaded.storageKey!)).toBeUndefined();
+    });
+
+    it("stores generated SVG results and falls back to the viewBox size when decoding gives no intrinsic size", async () => {
+        vi.stubGlobal("Image", class {
+            naturalWidth = 0;
+            naturalHeight = 0;
+            onload: (() => void) | null = null;
+            onerror: (() => void) | null = null;
+
+            set src(_value: string) {
+                queueMicrotask(() => this.onload?.());
+            }
+        });
+        const svg = new File([`<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480"></svg>`], "generated.svg", { type: "image/svg+xml" });
+
+        const uploaded = await uploadGeneratedImage(svg);
+        const stored = await getImageBlob(uploaded.storageKey!);
+
+        expect(stored?.type).toBe("image/svg+xml");
+        expect(uploaded).toMatchObject({ mimeType: "image/svg+xml", width: 640, height: 480 });
+        expect(previewStorage.get(uploaded.storageKey!)).toBeUndefined();
+    });
+
+    it("falls back to 1024 when an svg has no decodable or declared size", async () => {
+        vi.stubGlobal("Image", class {
+            naturalWidth = 0;
+            naturalHeight = 0;
+            onload: (() => void) | null = null;
+            onerror: (() => void) | null = null;
+
+            set src(_value: string) {
+                queueMicrotask(() => this.onload?.());
+            }
+        });
+        const svg = new File([`<svg xmlns="http://www.w3.org/2000/svg"></svg>`], "generated.svg", { type: "image/svg+xml" });
+
+        await expect(uploadGeneratedImage(svg)).resolves.toMatchObject({ mimeType: "image/svg+xml", width: 1024, height: 1024 });
+    });
+
+    it("keeps user uploads limited to PNG, JPEG and WebP", async () => {
+        await expect(uploadImage(new File([GIF_BYTES], "upload.gif", { type: "image/gif" }))).rejects.toThrow(FORMAT_ERROR_MESSAGE);
+        await expect(uploadImage(new File([`<svg xmlns="http://www.w3.org/2000/svg"></svg>`], "upload.svg", { type: "image/svg+xml" }))).rejects.toThrow(FORMAT_ERROR_MESSAGE);
+    });
 });

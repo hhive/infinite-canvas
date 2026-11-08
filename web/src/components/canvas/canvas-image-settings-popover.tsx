@@ -4,14 +4,14 @@ import { Settings2 } from "lucide-react";
 import { Button } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
+import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel, type ImageSettingKey } from "@/components/image-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 
 type CanvasImageSettingsPopoverProps = {
     config: AiConfig;
-    onConfigChange: (key: keyof AiConfig, value: string) => void;
+    onConfigChange: (key: ImageSettingKey, value: string) => void;
     onMissingConfig?: () => void;
     onOpenChange?: (open: boolean) => void;
     buttonClassName?: string;
@@ -87,7 +87,7 @@ function ImageSettingsPortal({
     placement: CanvasImageSettingsPopoverProps["placement"];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     config: AiConfig;
-    onConfigChange: (key: keyof AiConfig, value: string) => void;
+    onConfigChange: (key: ImageSettingKey, value: string) => void;
 }) {
     const width = 356;
     const gap = 8;

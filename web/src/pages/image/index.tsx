@@ -293,17 +293,21 @@ export default function ImagePage() {
     }, [autoRunToken]);
 
     const downloadImage = (image: GeneratedImage, index: number) => {
-        saveAs(image.dataUrl, `image-${index + 1}.png`);
+        saveAs(image.dataUrl, `image-${index + 1}${imageExtension(image.mimeType || image.dataUrl)}`);
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
-        const stored = await uploadImage(image.dataUrl);
-        setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}.png`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
-        message.success("已加入参考图");
+        try {
+            const stored = await uploadImage(image.dataUrl);
+            setReferences((value) => [...value, { id: nanoid(), name: `result-${index + 1}${imageExtension(stored.mimeType)}`, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
+            message.success("已加入参考图");
+        } catch (error) {
+            message.warning(error instanceof Error ? error.message : "该图片不能用作参考图");
+        }
     };
 
     const saveResultToAssets = async (image: GeneratedImage, index: number) => {
-        const stored = await uploadImage(image.dataUrl);
+        const stored = await uploadGeneratedImage(image.dataUrl);
         addAsset({
             kind: "image",
             title: `生成结果 ${index + 1}`,
@@ -681,7 +685,13 @@ function GenerationSettings({ config, model, taskActive, updateConfig, openConfi
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(true)} />
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
+                <ImageSettingsPanel config={config} model={model} onConfigChange={(key, value) => {
+                    if (key === "complexity") updateConfig("imageComplexity", value);
+                    else if (key === "format") updateConfig("imageFormat", value);
+                    else if (key === "frameCount") updateConfig("imageFrameCount", value);
+                    else if (key === "frameDurationMs") updateConfig("imageFrameDurationMs", value);
+                    else updateConfig(key, value);
+                }} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>
         </>
     );
@@ -958,6 +968,8 @@ function moveListItem<T>(items: T[], index: number, offset: number) {
 function imageExtension(mimeType: string) {
     if (mimeType === "image/jpeg") return ".jpg";
     if (mimeType === "image/webp") return ".webp";
+    if (mimeType === "image/gif") return ".gif";
+    if (mimeType === "image/svg+xml") return ".svg";
     return ".png";
 }
 

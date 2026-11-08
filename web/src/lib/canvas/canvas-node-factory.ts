@@ -1,5 +1,6 @@
 import { getNodeSpec, NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { normalizeImageComplexity, normalizeImageFrameCount, normalizeImageFrameDurationMs, normalizeImageOutputFormat } from "@/lib/image-26";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { UploadedImage } from "@/services/image-storage";
 import type { UploadedFile } from "@/services/file-storage";
@@ -47,6 +48,9 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
         size: config.size,
         quality: config.quality,
         ...(config.background ? { background: config.background } : {}),
+        complexity: normalizeImageComplexity(config.imageComplexity) || "auto",
+        format: normalizeImageOutputFormat(config.imageFormat),
+        ...(normalizeImageOutputFormat(config.imageFormat) === "gif" ? { frameCount: normalizeImageFrameCount(config.imageFrameCount), frameDurationMs: normalizeImageFrameDurationMs(config.imageFrameDurationMs) } : {}),
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
     };

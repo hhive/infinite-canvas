@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+import { normalizeImageComplexity, normalizeImageFrameCount, normalizeImageFrameDurationMs, normalizeImageOutputFormat } from "@/lib/image-26";
 import type { MediaCapability, MediaModel } from "@/services/api/media-models";
 import { useSessionStore } from "@/stores/use-session-store";
 
@@ -61,8 +62,14 @@ export type AiConfig = {
     background: string;
     count: string;
     canvasImageCount: string;
+    imageComplexity: string;
+    imageFormat: string;
+    imageFrameCount: string;
+    imageFrameDurationMs: string;
     proxyEnabled: boolean;
     proxyUrl: string;
+    nodeRegenerateBehavior: "new-node" | "overwrite";
+    autoFocusOnSelect: boolean;
 };
 
 export type WebdavSyncConfig = {
@@ -164,8 +171,14 @@ export const defaultConfig: AiConfig = {
     background: "",
     count: "1",
     canvasImageCount: "3",
+    imageComplexity: "auto",
+    imageFormat: "png",
+    imageFrameCount: "9",
+    imageFrameDurationMs: "200",
     proxyEnabled: false,
     proxyUrl: DEFAULT_LOCAL_PROXY_URL,
+    nodeRegenerateBehavior: "new-node",
+    autoFocusOnSelect: false,
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -260,8 +273,13 @@ export function filterModelsByCapability(models: string[], capability?: ModelCap
 export function resolveModelForCapability(config: AiConfig, currentModel: string | undefined, capability: ModelCapability) {
     const defaultModel = capability === "image" ? config.imageModel : capability === "video" ? config.videoModel : capability === "audio" ? config.audioModel : config.textModel;
     const fallbackModel = capability === "image" ? defaultConfig.imageModel : capability === "video" ? defaultConfig.videoModel : capability === "audio" ? defaultConfig.audioModel : defaultConfig.textModel;
-    if (currentModel && modelMatchesCapability(config, currentModel, capability)) return currentModel;
-    if (defaultModel && modelMatchesCapability(config, defaultModel, capability)) return defaultModel;
+    for (const model of [currentModel, defaultModel]) {
+        if (!model) continue;
+        const configuredCapability = modelCapabilityOf(config, model);
+        // Keep unavailable selections visible so the readiness check blocks the
+        // request. Only a known capability switch may choose another model.
+        if (!configuredCapability || configuredCapability === capability) return model;
+    }
     return fallbackModel;
 }
 
@@ -460,12 +478,18 @@ export const useConfigStore = create<ConfigStore>()(
                         videoWatermark: config.videoWatermark || "false",
                         videoMode: config.videoMode === "reference" ? "reference" : "frames",
                         canvasImageCount: config.canvasImageCount || "3",
+                        imageComplexity: normalizeImageComplexity(config.imageComplexity) || "auto",
+                        imageFormat: normalizeImageOutputFormat(config.imageFormat),
+                        imageFrameCount: String(normalizeImageFrameCount(config.imageFrameCount)),
+                        imageFrameDurationMs: String(normalizeImageFrameDurationMs(config.imageFrameDurationMs)),
                         imageModels: normalizeCapabilityModelList(persistedConfig.imageModels, channels, "image"),
                         videoModels: normalizeCapabilityModelList(persistedConfig.videoModels, channels, "video"),
                         textModels: normalizeCapabilityModelList(persistedConfig.textModels, channels, "text"),
                         audioModels: normalizeCapabilityModelList(persistedConfig.audioModels, channels, "audio"),
                         proxyEnabled: Boolean(config.proxyEnabled),
                         proxyUrl: config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
+                        nodeRegenerateBehavior: config.nodeRegenerateBehavior === "overwrite" ? "overwrite" : "new-node",
+                        autoFocusOnSelect: Boolean(config.autoFocusOnSelect),
                     },
                 };
             },

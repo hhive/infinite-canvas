@@ -9,8 +9,11 @@ import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-ang
 import type { ReferenceImage } from "@/types/image";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 
-export function imageExtension(dataUrl: string) {
-    return dataUrl.match(/^data:image[/]([^;]+)/)?.[1] || dataUrl.match(/image[/]([^;]+)/)?.[1] || "png";
+export function imageExtension(value: string) {
+    const raw = value.match(/^data:image[/]([^;]+)/)?.[1] || value.match(/image[/]([^;]+)/)?.[1] || "";
+    if (raw === "svg+xml") return "svg";
+    if (raw === "jpeg") return "jpg";
+    return raw || "png";
 }
 
 export function audioExtension(mimeType?: string) {
@@ -125,6 +128,10 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
         size: node?.metadata?.size || config.size || defaultConfig.size,
         background: node?.metadata?.background ?? config.background ?? defaultConfig.background,
+        imageComplexity: node?.metadata?.complexity || config.imageComplexity || defaultConfig.imageComplexity,
+        imageFormat: node?.metadata?.format || config.imageFormat || defaultConfig.imageFormat,
+        imageFrameCount: node?.metadata?.frameCount ? String(node.metadata.frameCount) : config.imageFrameCount || defaultConfig.imageFrameCount,
+        imageFrameDurationMs: node?.metadata?.frameDurationMs ? String(node.metadata.frameDurationMs) : config.imageFrameDurationMs || defaultConfig.imageFrameDurationMs,
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
         vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,
         videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
