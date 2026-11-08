@@ -126,6 +126,22 @@ describe("image settings 2.6 controls", () => {
         expect(onConfigChange).toHaveBeenCalledWith("svgModel", "gpt-6-x");
     });
 
+    it("forces 512x512 and hides size controls for gif", () => {
+        useConfigStore.setState({ mediaModels: { image: [{ id: "gpt-image-2.6-flare", mediaType: "image", model: "gpt-image-2.6-flare", displayName: "gpt-image-2.6-flare", providerName: "", apiMode: "images_2_6", priceQuota: 0 }], video: [], text: [] } });
+        const onConfigChange = vi.fn();
+        render(imageConfig("gpt-image-2.6-flare"), onConfigChange);
+
+        clickButton("GIF");
+
+        expect(onConfigChange).toHaveBeenCalledWith("format", "gif");
+        expect(onConfigChange).toHaveBeenCalledWith("size", "512x512");
+        render(imageConfig("gpt-image-2.6-flare", { imageFormat: "gif" }), onConfigChange);
+        expect(container.textContent).toContain("GIF 统一使用 512×512");
+        expect(container.textContent).not.toContain("分辨率");
+        expect(container.textContent).not.toContain("宽高比");
+        expect(container.textContent).not.toContain("尺寸");
+    });
+
     it("shows gif frame controls only for gif output", () => {
         useConfigStore.setState({ mediaModels: { image: [{ id: "gpt-image-2.6-flare", mediaType: "image", model: "gpt-image-2.6-flare", displayName: "gpt-image-2.6-flare", providerName: "", apiMode: "images_2_6", priceQuota: 0 }], video: [], text: [] } });
         const onConfigChange = vi.fn();

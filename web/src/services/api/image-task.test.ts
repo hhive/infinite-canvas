@@ -417,7 +417,7 @@ describe("gpt-image-2.6 image requests", () => {
         const images = await requestGeneration(image26Config("gpt-image-2.6-flare"), "draw");
 
         const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
-        expect(body).toMatchObject({ complexity: "low", quality: "low", output_format: "gif", frame_count: 12, frame_duration_ms: 400 });
+        expect(body).toMatchObject({ complexity: "low", quality: "low", output_format: "gif", frame_count: 12, frame_duration_ms: 400, size: "512x512" });
         expect(images).toHaveLength(1);
         expect(images[0]?.dataUrl.startsWith("data:image/gif;base64,")).toBe(true);
     });

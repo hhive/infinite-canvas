@@ -785,7 +785,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const image26 = resolveImage26Request(config, requestConfig.model);
     const n = image26.format === "svg" ? 1 : Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = image26.complexity || undefined;
-    const requestSize = resolveRequestSize(config.size);
+    const requestSize = image26.format === "gif" ? "512x512" : resolveRequestSize(config.size);
     const background = normalizeBackground(config.background);
     const script = resolveModelScript(config, selectedModel);
     if (script) {
@@ -895,7 +895,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const quality = image26.complexity || undefined;
-    const requestSize = resolveRequestSize(config.size);
+    const requestSize = image26.format === "gif" ? "512x512" : resolveRequestSize(config.size);
     const background = normalizeBackground(config.background);
     const script = resolveModelScript(config, selectedModel);
     if (script) {

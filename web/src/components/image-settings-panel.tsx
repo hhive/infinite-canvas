@@ -97,6 +97,10 @@ export function ImageSettingsPanel({ config, model, onConfigChange, theme, showT
                         </div>
                     </div>
                 ) : null}
+                {format === "gif" ? (
+                    <div className="text-xs" style={{ color: theme.node.muted }}>{t("settingsPanels.image.gifSizeHint")}</div>
+                ) : (
+                    <>
                 <div className="space-y-2.5">
                     <div className="flex items-center justify-between gap-3">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.size")}</SettingTitle>
@@ -143,6 +147,8 @@ export function ImageSettingsPanel({ config, model, onConfigChange, theme, showT
                         ))}
                     </div>
                 </div>
+                    </>
+                )}
                 {image26 ? (
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.outputFormat")}</SettingTitle>
@@ -154,6 +160,7 @@ export function ImageSettingsPanel({ config, model, onConfigChange, theme, showT
                                     theme={theme}
                                     onClick={() => {
                                         onConfigChange("format", value);
+                                        if (value === "gif") onConfigChange("size", "512x512");
                                         if (value !== "png" && transparentBackground) onConfigChange("background", "");
                                         if (value === "svg" && count !== 1) onConfigChange("count", "1");
                                     }}
