@@ -4,7 +4,7 @@ import i18n from "@/i18n";
 import { buildApiUrl, modelOptionName, resolveModelChannel, resolveModelRequestConfig, resolveModelScript, useConfigStore, withLocalProxy, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
-import { imageMimeTypeForFormat, normalizeImageComplexity, normalizeImageFrameCount, normalizeImageFrameDurationMs, normalizeImageOutputFormat, supportsImage26, type ImageOutputFormat } from "@/lib/image-26";
+import { imageMimeTypeForFormat, normalizeImageComplexity, normalizeImageFrameCount, normalizeImageFrameDurationMs, normalizeImageOutputFormat, supportsImage26, supportsImageComplexity, type ImageOutputFormat } from "@/lib/image-26";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { dataUrlToBlob, imageToDataUrl } from "@/services/image-storage";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
@@ -204,7 +204,6 @@ async function ensureImageModelAvailable(model: string, config: Pick<AiConfig, "
     if (!imageModelAvailability.has(modelName)) throw new Error(`当前模型 ${modelName} 没有可用的图片站配置`);
 }
 
-const IMAGE_QUALITY_VALUES = ["low", "medium", "high", "xhigh", "max"];
 const DEFAULT_IMAGE_SHORT_SIDE = 1024;
 const IMAGE_SIZE_STEP = 16;
 const IMAGE_MIN_PIXELS = 655360;
@@ -215,11 +214,6 @@ const IMAGE_MAX_RATIO = 3;
 const IMAGE_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
 const GEMINI_SUPPORTED_RATIOS = ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"];
-
-function normalizeQuality(quality: string) {
-    const value = quality.trim().toLowerCase();
-    return IMAGE_QUALITY_VALUES.includes(value) ? value : undefined;
-}
 
 function normalizeBackground(background: string | undefined) {
     return background?.trim().toLowerCase() === "transparent" ? "transparent" : undefined;
@@ -756,25 +750,27 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 }
 
 function resolveImage26Request(config: AiConfig, model: string) {
-    const advanced = supportsImage26(model, useConfigStore.getState().mediaModels?.image ?? []);
+    const mediaModels = useConfigStore.getState().mediaModels?.image ?? [];
+    const advanced = supportsImage26(model, mediaModels);
     return {
         advanced,
+        includeComplexity: advanced || supportsImageComplexity(model, mediaModels),
         format: advanced ? normalizeImageOutputFormat(config.imageFormat) : ("png" as ImageOutputFormat),
-        complexity: advanced ? normalizeImageComplexity(config.imageComplexity) : "",
+        complexity: normalizeImageComplexity(config.imageComplexity),
     };
 }
 
-function image26RequestFields(config: AiConfig, request: ReturnType<typeof resolveImage26Request>) {
+function image26RequestFields(config: AiConfig, request: ReturnType<typeof resolveImage26Request>, includeComplexity = false) {
     return {
-        ...(request.complexity ? { complexity: request.complexity } : {}),
+        ...(includeComplexity && request.complexity ? { complexity: request.complexity } : {}),
         output_format: request.format,
         ...(request.format === "gif" ? { frame_count: normalizeImageFrameCount(config.imageFrameCount), frame_duration_ms: normalizeImageFrameDurationMs(config.imageFrameDurationMs) } : {}),
     };
 }
 
-function image26FormFields(config: AiConfig, request: ReturnType<typeof resolveImage26Request>) {
+function image26FormFields(config: AiConfig, request: ReturnType<typeof resolveImage26Request>, includeComplexity = false) {
     const fields: Record<string, string> = { output_format: request.format };
-    if (request.complexity) fields.complexity = request.complexity;
+    if (includeComplexity && request.complexity) fields.complexity = request.complexity;
     if (request.format === "gif") {
         fields.frame_count = String(normalizeImageFrameCount(config.imageFrameCount));
         fields.frame_duration_ms = String(normalizeImageFrameDurationMs(config.imageFrameDurationMs));
@@ -787,7 +783,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const image26 = resolveImage26Request(config, requestConfig.model);
     const n = image26.format === "svg" ? 1 : Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
-    const quality = normalizeQuality(config.quality);
+    const quality = image26.complexity || undefined;
     const requestSize = resolveRequestSize(config.size);
     const background = normalizeBackground(config.background);
     const script = resolveModelScript(config, selectedModel);
@@ -827,7 +823,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                     ...(requestSize ? { size: requestSize } : {}),
                     ...(background ? { background } : {}),
                     ...(/gpt-image/.test(requestConfig.model) ? {} : { response_format: "b64_json" }),
-                    ...image26RequestFields(config, image26),
+                    ...image26RequestFields(config, image26, image26.advanced),
                 },
                 { headers: aiHeaders(requestConfig, "application/json"), signal: options?.signal, timeout: IMAGE_REQUEST_TIMEOUT_MS },
             );
@@ -848,7 +844,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 n,
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
-                ...image26RequestFields(config, image26),
+                ...image26RequestFields(config, image26, image26.includeComplexity),
             },
             options,
         );
@@ -897,7 +893,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (image26.format === "svg") throw new Error(apiText("imageSvgEditUnsupported"));
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
-    const quality = normalizeQuality(config.quality);
+    const quality = image26.complexity || undefined;
     const requestSize = resolveRequestSize(config.size);
     const background = normalizeBackground(config.background);
     const script = resolveModelScript(config, selectedModel);
@@ -933,7 +929,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         formData.set("n", String(n));
         if (!/gpt-image/.test(requestConfig.model)) formData.set("response_format", "b64_json");
         formData.set("output_format", image26.format);
-        if (image26.complexity) formData.set("complexity", image26.complexity);
+        if (image26.advanced && image26.complexity) formData.set("complexity", image26.complexity);
         if (image26.format === "gif") {
             formData.set("frame_count", String(normalizeImageFrameCount(config.imageFrameCount)));
             formData.set("frame_duration_ms", String(normalizeImageFrameDurationMs(config.imageFrameDurationMs)));
@@ -966,7 +962,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
                 prompt: withSystemPrompt(requestConfig, requestPrompt),
                 ...(quality ? { quality } : {}),
                 ...(requestSize ? { size: requestSize } : {}),
-                ...image26FormFields(config, image26),
+                ...image26FormFields(config, image26, image26.includeComplexity),
                 n: String(n),
             },
             inputImages,

@@ -19,6 +19,14 @@ export function supportsImage26(model: string, mediaModels: ReadonlyArray<Pick<M
     return /gpt-image-2\.6/i.test(name);
 }
 
+/** 非 2.6 的 Images 类模型也支持用复杂度选择质量档。 */
+export function supportsImageComplexity(model: string, mediaModels: ReadonlyArray<Pick<MediaModel, "model" | "apiMode">> = []) {
+    const name = model.includes("::") ? model.slice(model.indexOf("::") + 2) : model;
+    const matched = mediaModels.find((item) => item.model === name);
+    if (matched?.apiMode) return matched.apiMode === IMAGE_26_API_MODE || matched.apiMode === "images" || matched.apiMode === "images_official";
+    return true;
+}
+
 /** 空串表示不显式传 complexity，由上游默认或按 quality 折算。 */
 export function normalizeImageComplexity(value: string | undefined): ImageComplexity {
     const normalized = String(value || "").trim().toLowerCase();

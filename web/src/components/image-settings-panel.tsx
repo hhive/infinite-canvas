@@ -4,10 +4,10 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { normalizeImageComplexity, normalizeImageFrameCount, normalizeImageFrameDurationMs, normalizeImageOutputFormat, supportsImage26 } from "@/lib/image-26";
+import { normalizeImageComplexity, normalizeImageFrameCount, normalizeImageFrameDurationMs, normalizeImageOutputFormat, supportsImage26, supportsImageComplexity } from "@/lib/image-26";
 import { computeMediaSize, inferMediaRatio, inferMediaScale, mediaRatioOptions, mediaScaleOptions, readMediaDimensions } from "@/lib/media-size";
 import type { MediaModel } from "@/services/api/media-models";
-import { useConfigStore, type AiConfig } from "@/stores/use-config-store";
+import { resolveModelChannel, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
     { value: "auto", labelKey: "auto" },
@@ -28,6 +28,7 @@ const formatOptions = ["png", "gif", "svg"] as const;
 const EMPTY_MEDIA_MODELS: MediaModel[] = [];
 
 export const imageQualityOptions = qualityOptions.map((item) => ({ value: item.value, get label() { return i18n.t(`settingsPanels.common.${item.labelKey}`); } }));
+export const imageComplexityOptions = complexityOptions.map((item) => ({ value: item.value, get label() { return i18n.t(`settingsPanels.common.${item.labelKey}`); } }));
 export const imageAspectOptions = mediaRatioOptions.map((item) => ({ value: item.value, label: item.value === "auto" ? i18n.t("settingsPanels.common.auto") : item.value }));
 export const imageScaleOptions = mediaScaleOptions.map((value) => ({ value, label: value === "auto" ? i18n.t("settingsPanels.common.auto") : value }));
 
@@ -49,12 +50,13 @@ export function ImageSettingsPanel({ config, model, onConfigChange, theme, showT
     const { t } = useTranslation();
     const mediaModels = useConfigStore((state) => state.mediaModels?.image) || EMPTY_MEDIA_MODELS;
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
-    const image26 = supportsImage26(model || config.model || config.imageModel, mediaModels);
+    const selectedModel = model || config.model || config.imageModel;
+    const image26 = supportsImage26(selectedModel, mediaModels);
+    const complexityAvailable = resolveModelChannel(config, selectedModel).apiFormat !== "gemini" && supportsImageComplexity(selectedModel, mediaModels);
     const format = image26 ? normalizeImageOutputFormat(config.imageFormat) : "png";
-    const complexity = image26 ? normalizeImageComplexity(config.imageComplexity) : "";
+    const complexity = normalizeImageComplexity(config.imageComplexity);
     const frameCount = normalizeImageFrameCount(config.imageFrameCount);
     const frameDurationMs = normalizeImageFrameDurationMs(config.imageFrameDurationMs);
-    const quality = config.quality || "auto";
     const count = format === "svg" ? 1 : Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const transparentBackground = config.background === "transparent";
@@ -83,17 +85,7 @@ export function ImageSettingsPanel({ config, model, onConfigChange, theme, showT
                 }}
             >
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.image.title")}</div> : null}
-                <div className="space-y-2.5">
-                    <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.quality")}</SettingTitle>
-                    <div className="grid grid-cols-3 gap-2.5">
-                        {qualityOptions.map((item) => (
-                            <OptionPill key={item.value} selected={quality === item.value} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
-                                {t(`settingsPanels.common.${item.labelKey}`)}
-                            </OptionPill>
-                        ))}
-                    </div>
-                </div>
-                {image26 ? (
+                {complexityAvailable ? (
                     <div className="space-y-2.5">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.complexity")}</SettingTitle>
                         <div className="grid grid-cols-4 gap-2.5">

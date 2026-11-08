@@ -51,13 +51,23 @@ function clickButton(text: string) {
 }
 
 describe("image settings 2.6 controls", () => {
-    it("hides complexity and output format for other models", () => {
+    it("shows complexity without quality for other models", () => {
         useConfigStore.setState({ mediaModels: { image: [{ id: "gpt-image-2.6-flare", mediaType: "image", model: "gpt-image-2.6-flare", displayName: "gpt-image-2.6-flare", providerName: "", apiMode: "images", priceQuota: 0 }], video: [], text: [] } });
         render(imageConfig("gpt-image-2.6-flare", { imageFormat: "gif" }), () => undefined);
 
-        expect(container.textContent).not.toContain("复杂度");
+        expect(container.textContent).toContain("复杂度");
+        expect(container.textContent).not.toContain("质量");
         expect(container.textContent).not.toContain("输出格式");
         expect(container.textContent).not.toContain("帧数");
+        expect(container.textContent).toContain("生成张数");
+    });
+
+    it("hides complexity for responses image models", () => {
+        useConfigStore.setState({ mediaModels: { image: [{ id: "responses-image", mediaType: "image", model: "responses-image", displayName: "responses-image", providerName: "", apiMode: "responses", priceQuota: 0 }], video: [], text: [] } });
+        render(imageConfig("responses-image"), () => undefined);
+
+        expect(container.textContent).not.toContain("复杂度");
+        expect(container.textContent).not.toContain("质量");
         expect(container.textContent).toContain("生成张数");
     });
 
@@ -66,6 +76,7 @@ describe("image settings 2.6 controls", () => {
         render(imageConfig("gpt-image-2.6-flare"), () => undefined);
 
         expect(container.textContent).toContain("复杂度");
+        expect(container.textContent).not.toContain("质量");
         expect(container.textContent).toContain("输出格式");
         expect(container.textContent).toContain("PNG");
         expect(container.textContent).toContain("GIF");

@@ -8,7 +8,7 @@ vi.mock("@/services/api/model-plugin", async (importOriginal) => ({
 }));
 
 import { cancelImageTask, fetchChannelModels, fetchImageModels, probeImageSession, requestEdit, requestGeneration, waitForImageTask, type ImageTask } from "@/services/api/image";
-import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 
 vi.mock("axios", () => ({
@@ -410,19 +410,19 @@ describe("gpt-image-2.6 image requests", () => {
         };
     }
 
-    it("sends complexity, gif frames and renders a gif data URL", async () => {
+    it("sends complexity, maps it to quality, and renders a gif data URL", async () => {
         await registerModel("gpt-image-2.6-flare");
         vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.6-flare", { data: [{ b64_json: "R0lGODlh" }], output_format: "gif" }) });
 
         const images = await requestGeneration(image26Config("gpt-image-2.6-flare"), "draw");
 
         const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
-        expect(body).toMatchObject({ complexity: "low", output_format: "gif", frame_count: 12, frame_duration_ms: 400 });
+        expect(body).toMatchObject({ complexity: "low", quality: "low", output_format: "gif", frame_count: 12, frame_duration_ms: 400 });
         expect(images).toHaveLength(1);
         expect(images[0]?.dataUrl.startsWith("data:image/gif;base64,")).toBe(true);
     });
 
-    it("keeps png and omits 2.6 fields for non-2.6 models", async () => {
+    it("sends both quality and complexity for non-2.6 media models and keeps png", async () => {
         await registerModel("gpt-image-2.5-flare");
         vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.5-flare", { data: [{ b64_json: "aW1hZ2U=" }] }) });
 
@@ -431,10 +431,47 @@ describe("gpt-image-2.6 image requests", () => {
 
         const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
         expect(body.output_format).toBe("png");
-        expect(body.complexity).toBeUndefined();
+        expect(body.quality).toBe("low");
+        expect(body.complexity).toBe("low");
         expect(body.frame_count).toBeUndefined();
         expect(body.frame_duration_ms).toBeUndefined();
         expect(images[0]?.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
+    });
+
+    it("omits complexity for responses-mode media models", async () => {
+        await registerModel("responses-image");
+        useConfigStore.setState({ mediaModels: { image: [{ id: "responses-image", mediaType: "image", model: "responses-image", displayName: "responses-image", providerName: "", apiMode: "responses", priceQuota: 0 }], video: [], text: [] } });
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("responses-image", { data: [{ b64_json: "aW1hZ2U=" }] }) });
+
+        await requestGeneration(image26Config("responses-image"), "draw");
+
+        const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
+        expect(body.quality).toBe("low");
+        expect(body.complexity).toBeUndefined();
+        useConfigStore.setState({ mediaModels: { image: [], video: [], text: [] } });
+    });
+
+    it("does not send complexity to non-2.6 direct channels", async () => {
+        const config = { ...image26Config("gpt-image-2.5-direct"), model: "gpt-image-2.5-direct", imageModel: "gpt-image-2.5-direct" };
+        config.channels = defaultConfig.channels.map((channel) => ({ ...channel, baseUrl: "https://direct.example.test/v1", apiKey: "sk-direct", models: ["gpt-image-2.5-direct"] }));
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: { data: [{ b64_json: "aW1hZ2U=" }] } });
+
+        await requestGeneration(config, "draw");
+
+        const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
+        expect(body.quality).toBe("low");
+        expect(body.complexity).toBeUndefined();
+    });
+
+    it("sends neither quality nor complexity when complexity is auto", async () => {
+        await registerModel("gpt-image-2.6-flare");
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.6-flare", { data: [{ b64_json: "aW1hZ2U=" }] }) });
+
+        await requestGeneration(image26Config("gpt-image-2.6-flare", { imageComplexity: "auto" }), "draw");
+
+        const body = vi.mocked(axios.post).mock.calls[0]?.[1] as Record<string, unknown>;
+        expect(body.quality).toBeUndefined();
+        expect(body.complexity).toBeUndefined();
     });
 
     it("forces n=1 for svg output", async () => {
@@ -460,6 +497,18 @@ describe("gpt-image-2.6 image requests", () => {
         expect(axios.post).not.toHaveBeenCalled();
     });
 
+    it("sends both quality and complexity on non-2.6 media edits", async () => {
+        await registerModel("gpt-image-2.5-flare");
+        vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.5-flare", { data: [{ b64_json: "aW1hZ2U=" }] }) });
+        const reference = { id: "ref-1", name: "reference.png", type: "image/png", dataUrl: dataUrl("image/png", PNG_BYTES) };
+
+        await requestEdit(image26Config("gpt-image-2.5-flare"), "edit", [reference]);
+
+        const form = vi.mocked(axios.post).mock.calls[0]?.[1] as FormData;
+        expect(form.get("quality")).toBe("low");
+        expect(form.get("complexity")).toBe("low");
+    });
+
     it("sends complexity and gif frames on reference edits", async () => {
         await registerModel("gpt-image-2.6-flare");
         vi.mocked(axios.post).mockResolvedValueOnce({ data: completedTask("gpt-image-2.6-flare", { data: [{ b64_json: "R0lGODlh" }], output_format: "gif" }) });
@@ -469,6 +518,7 @@ describe("gpt-image-2.6 image requests", () => {
 
         const form = vi.mocked(axios.post).mock.calls[0]?.[1] as FormData;
         expect(form.get("output_format")).toBe("gif");
+        expect(form.get("quality")).toBe("low");
         expect(form.get("complexity")).toBe("low");
         expect(form.get("frame_count")).toBe("12");
         expect(form.get("frame_duration_ms")).toBe("400");

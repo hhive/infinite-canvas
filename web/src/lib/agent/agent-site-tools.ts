@@ -3,7 +3,7 @@ import type { NavigateFunction } from "react-router-dom";
 import i18n from "@/i18n";
 import { fetchPrompts } from "@/services/api/prompts";
 import { uploadImage } from "@/services/image-storage";
-import { imageAspectOptions, imageQualityOptions, imageScaleOptions } from "@/components/image-settings-panel";
+import { imageAspectOptions, imageComplexityOptions, imageScaleOptions } from "@/components/image-settings-panel";
 import { videoResolutionOptions, videoSecondsRange, videoSizeOptions } from "@/components/video-settings-panel";
 import type { CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { clampVideoSeconds } from "@/lib/media-size";
@@ -150,9 +150,9 @@ function getImageConfig() {
     const { config } = useConfigStore.getState();
     const model = config.imageModel || config.model;
     return {
-        current: { model, modelName: modelOptionName(model), quality: config.quality || "auto", size: config.size || "1:1", count: config.count || "1" },
+        current: { model, modelName: modelOptionName(model), complexity: config.imageComplexity || "auto", size: config.size || "1:1", count: config.count || "1" },
         models: selectableModelsByCapability(config, "image").map((value) => ({ value, label: modelOptionLabel(config, value) })),
-        qualityOptions: imageQualityOptions,
+        complexityOptions: imageComplexityOptions,
         scaleOptions: imageScaleOptions,
         sizeOptions: imageAspectOptions,
         countRange: { min: 1, max: 15 },
@@ -167,9 +167,10 @@ function runImageWorkbench(input: SiteToolInput, navigate: NavigateFunction) {
         configStore.updateConfig("imageModel", value);
         applied.model = value;
     }
-    if (typeof input.quality === "string" && input.quality.trim()) {
-        configStore.updateConfig("quality", input.quality);
-        applied.quality = input.quality;
+    const complexity = typeof input.complexity === "string" ? input.complexity : typeof input.quality === "string" ? input.quality : "";
+    if (complexity.trim()) {
+        configStore.updateConfig("imageComplexity", complexity);
+        applied.complexity = complexity;
     }
     if (typeof input.size === "string" && input.size.trim()) {
         configStore.updateConfig("size", input.size);
