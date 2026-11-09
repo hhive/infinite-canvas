@@ -23,6 +23,9 @@ export type VideoGenerationTask = {
     timeoutSeconds?: number;
     createdAt?: string;
     provider?: "media" | "openai" | "gemini" | "plugin";
+    /** 创建任务时实际使用的地址与 Key：轮询沿用它，避免渠道切换后查不到任务。 */
+    requestBaseUrl?: string;
+    requestApiKey?: string;
 };
 export type VideoGenerationTaskState =
     | { status: "pending"; task: VideoGenerationTask }
@@ -99,6 +102,7 @@ export async function resumeVideoGenerationTask(config: AiConfig, task: VideoGen
 async function pollVideoUntilComplete(config: AiConfig, task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
     let current = task;
     let deadline = videoTaskDeadline(current);
+    let notFoundAttempts = 0;
     while (Date.now() < deadline) {
         if (options?.signal?.aborted) throw new DOMException("本地轮询已停止", "AbortError");
         let state: VideoGenerationTaskState;
@@ -106,6 +110,13 @@ async function pollVideoUntilComplete(config: AiConfig, task: VideoGenerationTas
             state = await pollVideoGenerationTask(config, current, options);
         } catch (error) {
             if (!(error instanceof RetryableVideoPollError)) throw error;
+            // 404 通常是创建后立即可见的竞态：给有限次重试；持续 404 说明任务真不在（例如换了 Key）。
+            if (error.status === 404) {
+                notFoundAttempts += 1;
+                if (notFoundAttempts > 3) throw new Error(`${error.message}（任务可能由另一把 API Key 创建）`);
+            } else {
+                notFoundAttempts = 0;
+            }
             await delay(Math.min(current.pollAfterMs || 5000, Math.max(0, deadline - Date.now())), options?.signal);
             continue;
         }
@@ -130,6 +141,13 @@ function videoTaskFailed(message: string) {
 }
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
+    const requestConfig = resolveModelRequestConfig(config, (config.model || config.videoModel).trim());
+    const task = await createVideoGenerationTaskOnChannel(config, prompt, references, options);
+    // 记下创建时用的地址与 Key：后续轮询沿用它，渠道/Key 切换后仍能查到同一条任务。
+    return { ...task, requestBaseUrl: requestConfig.baseUrl, requestApiKey: requestConfig.apiKey };
+}
+
+async function createVideoGenerationTaskOnChannel(config: AiConfig, prompt: string, references: ReferenceImage[] = [], options?: VideoMediaOptions): Promise<VideoGenerationTask> {
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const script = resolveModelScript(config, selectedModel);
@@ -201,7 +219,10 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
             ? { status: "completed", task: { ...task, status: "completed" }, result }
             : { status: "failed", task: { ...task, status: "expired" }, error: "插件视频结果已失效，请重新生成" };
     }
-    const requestConfig = resolveModelRequestConfig(config, task.model);
+    const resolved = resolveModelRequestConfig(config, task.model);
+    const requestConfig = task.requestApiKey || task.requestBaseUrl
+        ? { ...resolved, apiKey: task.requestApiKey || resolved.apiKey, baseUrl: task.requestBaseUrl || resolved.baseUrl }
+        : resolved;
     if (task.provider === "gemini") return withTask(task, await pollGeminiVideoTask(requestConfig, task, options));
     if (task.provider === "openai") return withTask(task, await pollOpenAIVideoTask(requestConfig, task, options));
     try {
@@ -213,7 +234,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
         if (result?.url) return { status: "completed", task: current, result: { url: result.url, mimeType: result.mime_type || "video/mp4" } };
         throw new Error("视频任务已完成但没有返回可播放地址");
     } catch (error) {
-        if (isTransientVideoPollError(error)) throw new RetryableVideoPollError(readAxiosError(error, "视频任务查询失败"));
+        if (isTransientVideoPollError(error)) throw new RetryableVideoPollError(readAxiosError(error, "视频任务查询失败"), axios.isAxiosError(error) ? error.response?.status : undefined);
         throw new Error(readAxiosError(error, "视频任务查询失败"));
     }
 }
@@ -369,6 +390,7 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
         if (video.status === "failed" || video.status === "cancelled") return { status: "failed" as const, error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
         return { status: "pending" as const };
     } catch (error) {
+        if (isTransientVideoPollError(error)) throw new RetryableVideoPollError(readAxiosError(error, apiText("videoTaskQueryFailed")), axios.isAxiosError(error) ? error.response?.status : undefined);
         throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
     }
 }
@@ -455,10 +477,20 @@ function terminalStatusMessage(status: VideoTaskStatus) {
     return "视频生成失败";
 }
 
-class RetryableVideoPollError extends Error {}
+class RetryableVideoPollError extends Error {
+    status?: number;
+    constructor(message: string, status?: number) {
+        super(message);
+        this.status = status;
+    }
+}
 
 function isTransientVideoPollError(error: unknown) {
-    return !axios.isCancel(error) && axios.isAxiosError(error) && !error.response;
+    if (axios.isCancel(error) || !axios.isAxiosError(error)) return false;
+    if (!error.response) return true;
+    const status = error.response.status;
+    // 创建后立刻轮询可能撞上写入竞态（404），限流/网关/服务端错误同样值得重试。
+    return status === 404 || status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
 }
 
 function readAxiosError(error: unknown, fallback: string) {

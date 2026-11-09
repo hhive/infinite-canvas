@@ -129,7 +129,7 @@ describe("media video task API", () => {
 
         const created = await createVideoGenerationTask(config("media-video-create", "secret-key"), "ocean at dusk");
 
-        expect(created).toEqual({ id: "video-1", modelConfigId: 7, model: "media-video-create", status: "queued", pollAfterMs: 1500 });
+        expect(created).toMatchObject({ id: "video-1", modelConfigId: 7, model: "media-video-create", status: "queued", pollAfterMs: 1500, requestApiKey: "secret-key" });
         expect(axios.get).toHaveBeenCalledWith("/v1/models", expect.objectContaining({ params: { media_type: "video" }, withCredentials: true }));
         expect(axios.post).toHaveBeenCalledWith(
             "/v1/videos",
@@ -253,13 +253,54 @@ describe("media video task API", () => {
         expect(axios.get).toHaveBeenCalledTimes(2);
     });
 
-    it("does not retry an HTTP polling error", async () => {
-        const httpError = Object.assign(new Error("Request failed with status code 503"), { response: { status: 503 } });
-        vi.mocked(axios.isAxiosError).mockImplementation((error) => error === httpError);
-        vi.mocked(axios.get).mockRejectedValueOnce(httpError);
+    it("does not retry an HTTP polling error that is not transient", async () => {
+        const forbidden = Object.assign(new Error("Request failed with status code 403"), { response: { status: 403 } });
+        vi.mocked(axios.isAxiosError).mockImplementation((error) => error === forbidden);
+        vi.mocked(axios.get).mockRejectedValueOnce(forbidden);
 
-        await expect(resumeVideoGenerationTask(config(task.model), task)).rejects.toThrow("Request failed with status code 503");
+        await expect(resumeVideoGenerationTask(config(task.model), task)).rejects.toThrow("Request failed with status code 403");
         expect(axios.get).toHaveBeenCalledOnce();
+    });
+
+    it("polls with the API key captured when the task was created", async () => {
+        const created = { ...task, requestApiKey: "sk-created", requestBaseUrl: "/" };
+        vi.mocked(axios.get).mockResolvedValueOnce({ data: { task_id: "video-1", status: "completed", model_config_id: 7, model: task.model, result: { url: "https://media.example.test/result.mp4" } } });
+
+        await expect(resumeVideoGenerationTask(config(task.model, "sk-other"), created)).resolves.toEqual({
+            url: "https://media.example.test/result.mp4",
+            mimeType: "video/mp4",
+        });
+
+        const options = vi.mocked(axios.get).mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined;
+        expect(options?.headers?.Authorization).toBe("Bearer sk-created");
+    });
+
+    it("retries a 404 that arrives right after task creation", async () => {
+        vi.useFakeTimers();
+        const notFound = Object.assign(new Error("Request failed with status code 404"), { response: { status: 404 } });
+        vi.mocked(axios.isAxiosError).mockImplementation((error) => error === notFound);
+        vi.mocked(axios.get)
+            .mockRejectedValueOnce(notFound)
+            .mockResolvedValueOnce({ data: { task_id: "video-1", status: "completed", model_config_id: 7, model: task.model, result: { url: "https://media.example.test/result.mp4" } } });
+
+        const pending = resumeVideoGenerationTask(config(task.model), { ...task, pollAfterMs: 5 });
+        await vi.advanceTimersByTimeAsync(20);
+
+        await expect(pending).resolves.toEqual({ url: "https://media.example.test/result.mp4", mimeType: "video/mp4" });
+        expect(axios.get).toHaveBeenCalledTimes(2);
+    });
+
+    it("stops after repeated 404 and points at the creating key", async () => {
+        vi.useFakeTimers();
+        const notFound = Object.assign(new Error("Request failed with status code 404"), { response: { status: 404 } });
+        vi.mocked(axios.isAxiosError).mockImplementation((error) => error === notFound);
+        vi.mocked(axios.get).mockRejectedValue(notFound);
+
+        const pending = expect(resumeVideoGenerationTask(config(task.model), { ...task, pollAfterMs: 5 })).rejects.toThrow("另一把 API Key");
+        await vi.advanceTimersByTimeAsync(200);
+
+        await pending;
+        expect(axios.get).toHaveBeenCalledTimes(4);
     });
 
     it("does not retry a canceled polling request", async () => {
